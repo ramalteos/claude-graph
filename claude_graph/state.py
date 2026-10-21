@@ -1,0 +1,60 @@
+"""The graph's shared state: one task, from request to reviewed branch."""
+
+from __future__ import annotations
+
+import operator
+import re
+from typing import Annotated, Literal, TypedDict
+
+Status = Literal["running", "done", "exhausted", "failed"]
+Verdict = Literal["approve", "changes", "redesign"]
+DEFAULT_MAX_ITERATIONS = 3
+TASK_ID = re.compile(r"^(?!\.+$)[A-Za-z0-9._-]{1,40}$")  # a path segment, never "." or ".."
+
+
+class StepRecord(TypedDict):
+    """One box run. A TypedDict, not a dataclass, so the SQLite checkpointer stores it as-is."""
+
+    role: str
+    attempt: int
+    box: str | None
+    exit_code: int
+    duration_s: float
+    cost_usd: float | None
+    log_path: str
+    parsed_ok: bool
+
+
+class TaskState(TypedDict, total=False):
+    task_id: str
+    request: str
+    repo: str
+    worktree: str
+    branch: str
+    base_sha: str
+    spec: str
+    acceptance_criteria: list[str]
+    plan: str
+    coder_summary: str
+    qa_passed: bool
+    qa_report: str
+    review_verdict: Verdict
+    review_notes: str
+    iteration: int  # coder runs so far
+    max_iterations: int
+    status: Status
+    steps: Annotated[list[StepRecord], operator.add]
+
+
+def initial_state(
+    *, task_id: str, request: str, repo: str, max_iterations: int = DEFAULT_MAX_ITERATIONS
+) -> TaskState:
+    return TaskState(
+        task_id=task_id,
+        request=request,
+        repo=repo,
+        iteration=0,
+        max_iterations=max_iterations,
+        status="running",
+        steps=[],
+    )

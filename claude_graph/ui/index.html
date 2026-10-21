@@ -1,0 +1,421 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>claude-graph</title>
+<style>
+:root {
+  --bg: #f7f8fa; --panel: #ffffff; --panel-2: #f2f4f7; --line: #e3e6ea;
+  --ink: #16191d; --ink-2: #5b6472; --ink-3: #8a93a1;
+  --accent: #2f6feb; --ok: #1f8a4c; --warn: #b7791f; --bad: #c0392b; --idle: #8a93a1;
+  --violet: #6b46c1; --teal: #0f766e; --rose: #a3376b;
+  --radius: 12px; --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1216; --panel: #161a20; --panel-2: #1c222a; --line: #262d37;
+    --ink: #e7ebf0; --ink-2: #a3adbb; --ink-3: #6f7a89;
+    --accent: #5c93ff; --ok: #3fbd6f; --warn: #e0a83c; --bad: #ef6a5c;
+    --violet: #a78bfa; --teal: #4dd4c1; --rose: #f472a8;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+header { position: sticky; top: 0; z-index: 10; backdrop-filter: blur(10px); background: color-mix(in srgb, var(--bg) 82%, transparent); border-bottom: 1px solid var(--line); padding: 14px 20px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+h1 { font-size: 15px; font-weight: 650; margin: 0; letter-spacing: -0.01em; }
+h1 span { color: var(--ink-3); font-weight: 450; }
+main { padding: 20px; max-width: 1600px; margin: 0 auto; }
+.cols { display: grid; gap: 20px; grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr); align-items: start; }
+@media (max-width: 1180px) { .cols { grid-template-columns: minmax(0, 1fr); } }
+.cols > div { min-width: 0; }
+details.sec { margin-bottom: 12px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+details.sec > summary { cursor: pointer; list-style: none; user-select: none; display: flex; align-items: center; gap: 8px; padding: 11px 14px; font-size: 11px; text-transform: uppercase; letter-spacing: .07em; color: var(--ink-2); font-weight: 650; }
+details.sec > summary::-webkit-details-marker { display: none; }
+details.sec > summary::before { content: "›"; font-size: 14px; line-height: 1; color: var(--ink-3); transition: transform .15s ease; }
+details.sec[open] > summary::before { transform: rotate(90deg); }
+details.sec > summary:hover { background: var(--panel-2); color: var(--ink); }
+details.sec[open] > summary { border-bottom: 1px solid var(--line); }
+details.sec > .scroll, details.sec > .grid.bounded { border: 0; border-radius: 0; background: transparent; max-height: min(46vh, 540px); }
+details.sec > .grid.bounded { padding: 12px; }
+details.sec .empty { border: 0; }
+.pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; background: var(--panel); border: 1px solid var(--line); font-size: 12px; color: var(--ink-2); white-space: nowrap; }
+.pill.bad { border-color: var(--bad); color: var(--bad); }
+.dot { width: 7px; height: 7px; border-radius: 50%; background: var(--idle); flex: none; }
+.dot.live { background: var(--ok); animation: pulse 1.8s ease-in-out infinite; }
+.dot.warn { background: var(--warn); } .dot.bad { background: var(--bad); }
+@keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: .35 } }
+.spacer { flex: 1 1 auto; }
+.grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px; }
+.card.live { border-color: color-mix(in srgb, var(--ok) 45%, var(--line)); }
+.card-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.badge { font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: 6px; background: var(--panel-2); color: var(--ink-2); white-space: nowrap; }
+.badge.pm { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
+.badge.architect { background: color-mix(in srgb, var(--violet) 18%, transparent); color: var(--violet); }
+.badge.coder { background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); }
+.badge.qa { background: color-mix(in srgb, var(--warn) 20%, transparent); color: var(--warn); }
+.badge.reviewer { background: color-mix(in srgb, var(--teal) 20%, transparent); color: var(--teal); }
+.mono { font-family: var(--mono); font-size: 12px; }
+.muted { color: var(--ink-2); } .dim { color: var(--ink-3); }
+.elapsed { margin-left: auto; font-family: var(--mono); font-size: 12px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+button { font: inherit; font-size: 12px; padding: 5px 10px; border-radius: 8px; cursor: pointer; border: 1px solid var(--line); background: var(--panel-2); color: var(--ink); }
+button:hover { border-color: var(--accent); color: var(--accent); }
+button.danger:hover { border-color: var(--bad); color: var(--bad); }
+button:disabled { opacity: .5; cursor: default; }
+.actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+.board { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
+.col { background: var(--panel-2); border: 1px solid var(--line); border-radius: var(--radius); padding: 10px; max-height: min(58vh, 700px); overflow: auto; overscroll-behavior: contain; }
+.col h3 { font-size: 11px; margin: 0 0 8px; text-transform: uppercase; letter-spacing: .07em; color: var(--ink-3); display: flex; justify-content: space-between; position: sticky; top: 0; background: var(--panel-2); padding-bottom: 6px; z-index: 1; }
+.task { background: var(--panel); border: 1px solid var(--line); border-radius: 9px; padding: 9px 10px; margin-bottom: 8px; }
+.task:last-child { margin-bottom: 0; }
+.task .t { font-weight: 550; font-size: 13px; }
+.tid { font-family: var(--mono); font-size: 11px; font-weight: 600; color: var(--ink-3); background: var(--panel-2); border: 1px solid var(--line); border-radius: 5px; padding: 0 4px; margin-right: 6px; vertical-align: 1px; }
+.chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+.chip { font-size: 11px; padding: 2px 7px; border-radius: 5px; background: var(--panel-2); color: var(--ink-2); }
+.chip.ok { color: var(--ok); } .chip.bad { color: var(--bad); } .chip.warn { color: var(--warn); }
+.strip { display: flex; gap: 4px; align-items: center; margin-top: 6px; flex-wrap: wrap; }
+.node { font-family: var(--mono); font-size: 10px; padding: 1px 6px; border-radius: 4px; border: 1px solid var(--line); color: var(--ink-3); }
+.node.done { border-color: var(--ok); color: var(--ok); } .node.run { border-color: var(--accent); color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent); }
+.node.bad { border-color: var(--bad); color: var(--bad); }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-3); font-weight: 600; padding: 6px 10px; }
+td { padding: 8px 10px; border-top: 1px solid var(--line); vertical-align: top; }
+tr:hover td { background: var(--panel-2); }
+tr.click { cursor: pointer; }
+.scroll { overflow: auto; max-height: min(52vh, 620px); background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); overscroll-behavior: contain; }
+.scroll.tight { max-height: min(30vh, 300px); }
+.scroll thead th { position: sticky; top: 0; z-index: 1; background: var(--panel); border-bottom: 1px solid var(--line); }
+.grid.bounded { max-height: min(46vh, 560px); overflow: auto; overscroll-behavior: contain; }
+.empty { color: var(--ink-3); font-size: 13px; padding: 14px; text-align: center; background: var(--panel); border: 1px dashed var(--line); border-radius: var(--radius); }
+.att { display: flex; gap: 10px; align-items: center; padding: 9px 14px; border-top: 1px solid var(--line); }
+.att:first-child { border-top: 0; }
+.att .what { flex: 1; }
+#drawer { position: fixed; inset: auto 0 0 0; height: 62vh; background: var(--panel); border-top: 1px solid var(--line); transform: translateY(100%); transition: transform .22s cubic-bezier(.2,.8,.2,1); display: flex; flex-direction: column; z-index: 20; }
+#drawer.open { transform: translateY(0); box-shadow: 0 -18px 40px rgba(0,0,0,.18); }
+#drawer.tall { height: 94vh; }
+#drawer header { position: static; background: none; backdrop-filter: none; }
+#body { flex: 1; overflow: auto; margin: 0; padding: 14px 20px; font-family: var(--mono); font-size: 12px; line-height: 1.55; white-space: pre-wrap; color: var(--ink-2); }
+#body.doc { font-family: inherit; font-size: 14px; white-space: normal; color: var(--ink); padding: 18px 24px 40px; max-width: 92ch; }
+.doc h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .07em; color: var(--ink-2); margin: 20px 0 8px; padding-top: 12px; border-top: 1px solid var(--line); }
+.doc pre { background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; white-space: pre-wrap; font-family: var(--mono); font-size: 12.5px; }
+.doc ol { margin: 6px 0 6px 22px; }
+.l-tool { color: var(--accent); } .l-err { color: var(--bad); } .l-res { color: var(--violet); } .l-meta { color: var(--ink-3); }
+form.new { display: grid; gap: 10px; max-width: 70ch; padding: 18px 24px; font-family: inherit; white-space: normal; }
+form.new label { display: grid; gap: 4px; font-size: 12px; color: var(--ink-2); }
+form.new input, form.new textarea { font: inherit; padding: 7px 9px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel-2); color: var(--ink); }
+form.new textarea { min-height: 90px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>claude-graph <span id="subtitle"></span></h1>
+  <span class="pill" id="engine"><span class="dot"></span><span>engine</span></span>
+  <span class="pill" id="login">login</span>
+  <span class="pill" id="inflight">–</span>
+  <span class="pill" id="spend">–</span>
+  <span class="spacer"></span>
+  <span id="actionbar"></span>
+  <button id="notify">notify me</button>
+  <span class="pill"><span class="dot live"></span><span id="refreshed">live</span></span>
+</header>
+<main>
+  <details class="sec" id="sec-boxes" open>
+    <summary>In flight <span class="dim" id="boxescount"></span></summary>
+    <div class="grid bounded" id="boxes"></div>
+  </details>
+  <details class="sec" id="sec-attention" open hidden>
+    <summary>Needs you <span class="dim" id="attentioncount"></span></summary>
+    <div class="scroll tight" id="attention"></div>
+  </details>
+  <details class="sec" id="sec-board" open>
+    <summary>Tasks <span class="dim" id="taskscount"></span></summary>
+    <div class="board" id="board" style="padding:12px"></div>
+  </details>
+  <div class="cols">
+    <div>
+      <details class="sec" id="sec-activity" open>
+        <summary>Activity <span class="dim" id="timelinecount"></span></summary>
+        <div class="scroll" id="timeline"></div>
+      </details>
+      <details class="sec" id="sec-logs">
+        <summary>Logs <span class="dim" id="logscount"></span></summary>
+        <div class="scroll" id="logs"></div>
+      </details>
+    </div>
+    <div>
+      <details class="sec" id="sec-roles" open>
+        <summary>Roles and spend</summary>
+        <div class="scroll" id="roles"></div>
+      </details>
+      <details class="sec" id="sec-engine" open>
+        <summary>Engine <span class="dim" id="enginecount"></span></summary>
+        <div class="scroll tight" id="enginebox"></div>
+      </details>
+      <details class="sec" id="sec-config">
+        <summary>Config</summary>
+        <div class="scroll" id="config"></div>
+      </details>
+    </div>
+  </div>
+</main>
+<div id="drawer">
+  <header>
+    <strong class="mono" id="drawertitle">log</strong>
+    <span class="spacer"></span>
+    <label class="dim" id="followwrap"><input type="checkbox" id="follow" checked> follow</label>
+    <button id="rawbtn">raw</button>
+    <button id="sizebtn">expand</button>
+    <button id="closebtn">close</button>
+  </header>
+  <pre id="body"></pre>
+</div>
+<script>
+const API_EXPECTED = 1;
+const ACTION_TOKEN = "__ACTION_TOKEN__";
+const ACTIONS_ON = ACTION_TOKEN.length > 0;
+const ROLES = ["pm", "architect", "coder", "qa", "reviewer"];
+const COLUMNS = ["running", "stopped", "failed", "exhausted", "done"];
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const store = { get: (k) => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch {} } };
+let last = null;
+const drawer = { kind: null, task: null, name: null, offset: 0, lines: [], raw: false, seq: 0 };
+let seenDone = new Set();
+
+function dur(sec) { if (sec == null) return ""; sec = Math.max(0, Math.round(sec)); return sec < 60 ? sec + "s" : sec < 3600 ? Math.floor(sec / 60) + "m" + (sec % 60) + "s" : Math.floor(sec / 3600) + "h" + Math.floor((sec % 3600) / 60) + "m"; }
+function ago(iso) { if (!iso) return ""; const s = (Date.now() - Date.parse(iso)) / 1000; return s < 90 ? Math.round(s) + "s ago" : s < 5400 ? Math.round(s / 60) + "m ago" : Math.round(s / 3600) + "h ago"; }
+function money(x) { return "$" + (x || 0).toFixed(2); }
+function setHTML(id, html) { const e = $(id); if (e.innerHTML !== html) e.innerHTML = html; }
+function btn(action, arg, label, cls) { return ACTIONS_ON ? `<button data-act="${esc(action)}" data-arg="${esc(arg)}" class="${cls || ""}">${esc(label)}</button>` : ""; }
+function openBtn(kind, task, name, label) { return `<button data-open="${esc(kind)}" data-task="${esc(task)}" data-name="${esc(name || "")}">${esc(label)}</button>`; }
+
+async function poll() {
+  let s;
+  try { s = await (await fetch("/api/state", { cache: "no-store" })).json(); }
+  catch (e) { $("refreshed").textContent = "offline"; return; }
+  last = s;
+  if (s.api_version !== API_EXPECTED) { $("refreshed").textContent = "server/page mismatch — restart ui"; }
+  render(s);
+  $("refreshed").textContent = new Date().toLocaleTimeString();
+}
+
+function render(s) {
+  $("subtitle").textContent = s.state_dir.replace(/^\/Users\/[^/]+/, "~");
+  const eng = $("engine"); eng.innerHTML = `<span class="dot ${s.engine_boxes.some(l => /failed/.test(l)) ? "bad" : "live"}"></span><span>${esc(s.engine)}</span>`;
+  const login = $("login"); login.textContent = "login " + s.login; login.className = "pill" + (["ok", "api-key", "no-expiry"].includes(s.login) ? "" : " bad");
+  $("inflight").textContent = s.boxes.length + " in flight";
+  $("spend").textContent = money(s.spend.total) + " total · " + money(s.spend.today) + " today";
+  $("spend").title = "sum of total_cost_usd reported by every box";
+  setHTML("actionbar", ACTIONS_ON
+    ? `<button data-open="new">new task</button> ${btn("purge", "", "purge finished", "danger")}`
+    : `<span class="pill" title="start with: claude-graph ui --actions">actions off</span>`);
+
+  // in flight
+  $("boxescount").textContent = s.boxes.length || "";
+  setHTML("boxes", s.boxes.length ? s.boxes.map(b => `
+    <div class="card live">
+      <div class="card-head"><span class="badge ${esc(b.role)}">${esc(b.role)}</span><span class="tid">${esc(b.task_id)}</span><span class="dim">${esc(b.model || "")}${b.effort ? " · " + esc(b.effort) : ""}</span><span class="elapsed">${dur(b.elapsed_s)}</span></div>
+      <div class="mono dim">${esc(b.box || "")}</div>
+      <div class="actions">${openBtn("log", b.task_id, b.log, "log")}${btn("stop-box", b.box, "stop box", "danger")}</div>
+    </div>`).join("") : `<div class="empty">no box running</div>`);
+
+  // needs you
+  $("sec-attention").hidden = !s.attention.length;
+  $("attentioncount").textContent = s.attention.length || "";
+  setHTML("attention", s.attention.map(a => `
+    <div class="att"><span class="dot ${a.kind === "login" ? "bad" : "warn"}"></span><span class="what">${a.task_id ? `<span class="tid">${esc(a.task_id)}</span>` : ""}${esc(a.text)}</span>
+      ${a.task_id ? openBtn("task", a.task_id, "", "open") : ""}${a.box ? btn("stop-box", a.box, "stop box", "danger") : ""}${a.kind === "task" ? btn("resume", a.task_id, "resume") : ""}</div>`).join(""));
+
+  // board
+  $("taskscount").textContent = s.tasks.length || "";
+  const byCol = Object.fromEntries(COLUMNS.map(c => [c, []]));
+  for (const t of s.tasks) (byCol[t.status] || (byCol[t.status] = [])).push(t);
+  setHTML("board", Object.entries(byCol).map(([col, items]) => `
+    <div class="col"><h3><span>${esc(col)}</span><span>${items.length}</span></h3>${items.map(taskCard).join("") || `<div class="dim" style="font-size:12px">—</div>`}</div>`).join(""));
+
+  // activity
+  $("timelinecount").textContent = s.timeline.length || "";
+  setHTML("timeline", s.timeline.length ? `<table><thead><tr><th>when</th><th>task</th><th>role</th><th>#</th><th>exit</th><th>took</th><th>cost</th></tr></thead><tbody>${s.timeline.map(e => `
+    <tr class="click" data-open="log" data-task="${esc(e.task_id)}" data-name="${esc(e.log || "")}"><td class="dim">${esc(ago(e.finished || e.started))}</td><td><span class="tid">${esc(e.task_id)}</span></td><td><span class="badge ${esc(e.role)}">${esc(e.role)}</span></td><td>${esc(e.attempt)}</td><td class="${e.exit_code === 0 ? "muted" : e.exit_code == null ? "dim" : "bad"}">${e.exit_code == null ? "running" : esc(e.exit_code)}</td><td class="mono">${dur(e.duration_s ?? e.elapsed_s)}</td><td class="mono">${e.cost_usd != null ? "$" + e.cost_usd.toFixed(3) : ""}</td></tr>`).join("")}</tbody></table>` : `<div class="empty">nothing has run yet</div>`);
+
+  // logs
+  $("logscount").textContent = s.logs.length || "";
+  setHTML("logs", s.logs.length ? `<table><thead><tr><th>task</th><th>log</th><th>size</th><th>changed</th></tr></thead><tbody>${s.logs.map(l => `
+    <tr class="click" data-open="log" data-task="${esc(l.task_id)}" data-name="${esc(l.name)}"><td><span class="tid">${esc(l.task_id)}</span></td><td class="mono">${esc(l.name)}</td><td class="mono">${(l.size / 1024).toFixed(0)} KB</td><td class="dim">${esc(ago(new Date(l.mtime * 1000).toISOString()))}</td></tr>`).join("")}</tbody></table>` : `<div class="empty">no logs yet</div>`);
+
+  // roles
+  setHTML("roles", `<table><thead><tr><th>role</th><th>model</th><th>runs</th><th>reports ok</th><th>avg</th><th>cost</th></tr></thead><tbody>${s.role_stats.map(r => `
+    <tr><td><span class="badge ${esc(r.role)}">${esc(r.role)}</span></td><td class="mono">${esc(s.config.models[r.role] || "")}</td><td>${r.runs}</td><td>${r.runs ? Math.round(100 * r.ok / r.runs) + "%" : ""}</td><td class="mono">${r.runs ? dur(r.avg_s) : ""}</td><td class="mono">${money(r.cost)}</td></tr>`).join("")}</tbody></table>`);
+
+  // engine
+  $("enginecount").textContent = Math.max(0, s.engine_boxes.length - 1) || "";
+  setHTML("enginebox", s.engine_boxes.length ? `<pre style="margin:0;padding:10px 14px" class="mono">${esc(s.engine_boxes.join("\n"))}</pre>` : `<div class="empty">claude-box ps: nothing running</div>`);
+
+  // config
+  setHTML("config", `<table><tbody>${Object.entries(s.config.models).map(([r, m]) => `<tr><td><span class="badge ${esc(r)}">${esc(r)}</span></td><td class="mono">${esc(m)} · effort ${esc(s.config.effort)}</td></tr>`).join("")}<tr><td>override</td><td class="dim">&lt;repo&gt;/claude-graph.toml → [models] / [efforts]</td></tr><tr><td>state</td><td class="mono dim">${esc(s.state_dir)}</td></tr></tbody></table>`);
+
+  notifyDone(s.tasks);
+}
+
+function taskCard(t) {
+  const done = new Set(t.steps.map(x => x.role));
+  const run = t.running ? t.running.role : null;
+  const lastStep = t.steps[t.steps.length - 1];
+  const strip = ROLES.map(r => `<span class="node ${r === run ? "run" : (t.status === "failed" && lastStep && lastStep.role === r) ? "bad" : done.has(r) ? "done" : ""}">${r}</span>`).join("");
+  const p = t.progress;
+  const chips = [
+    `<span class="chip">iter ${t.iteration}/${t.max_iterations ?? "?"}</span>`,
+    `<span class="chip">${money(t.cost)}</span>`,
+    t.branch ? `<span class="chip mono">${esc(t.branch)}</span>` : "",
+    p && p.branch_exists ? `<span class="chip ${p.commits ? "ok" : ""}">+${p.commits} commit${p.commits === 1 ? "" : "s"}${p.shortstat ? " · " + esc(p.shortstat.replace(/ files? changed/, "f").replace(/ insertions?\(\+\)/, "+").replace(/ deletions?\(-\)/, "-")) : ""}</span>` : "",
+    t.qa_passed === false ? `<span class="chip bad">qa failed</span>` : t.qa_passed ? `<span class="chip ok">qa ok</span>` : "",
+    t.review_verdict ? `<span class="chip ${t.review_verdict === "approve" ? "ok" : "warn"}">${esc(t.review_verdict)}</span>` : "",
+    t.pid ? `<span class="chip">pid ${t.pid}</span>` : "",
+  ].join("");
+  const acts = [
+    openBtn("task", t.task_id, "", "open"),
+    lastStep ? openBtn("log", t.task_id, lastLog(t), "log") : "",
+    t.branch ? openBtn("diff", t.task_id, "", "diff") : "",
+    t.pid || t.running ? btn("cancel", t.task_id, "cancel", "danger") : "",
+    !t.pid && !t.running && t.status !== "done" && t.status !== "starting" ? btn("resume", t.task_id, "resume") : "",
+    !t.pid && t.worktree_present ? btn("remove-worktree", t.task_id, "drop worktree") : "",
+    !t.pid && !t.running ? btn("delete-task", t.task_id, "delete", "danger") : "",
+  ].join("");
+  return `<div class="task"><div class="t"><span class="tid">${esc(t.task_id)}</span>${esc(t.request || "(no request)")}</div>
+    <div class="strip">${strip}</div><div class="chips">${chips}</div>
+    <div class="dim" style="font-size:12px;margin-top:6px">${esc(t.next_action)} · ${esc(ago(t.updated_at))}</div>
+    <div class="actions">${acts}</div></div>`;
+}
+function lastLog(t) { const n = t.steps.length; const s = t.steps[n - 1]; return String(s.attempt).padStart(2, "0") + "-" + s.role + ".log"; }
+
+// --- drawer ---------------------------------------------------------------------------
+function openDrawer(title, kind) {
+  drawer.kind = kind; ++drawer.seq;
+  $("drawertitle").textContent = title;
+  $("body").className = kind === "task" || kind === "new" ? "doc" : "";
+  $("followwrap").hidden = kind !== "log"; $("rawbtn").hidden = kind !== "log";
+  $("drawer").classList.add("open");
+}
+function closeDrawer() { drawer.kind = null; $("drawer").classList.remove("open"); }
+async function showLog(task, name) {
+  drawer.task = task; drawer.name = name; drawer.offset = 0; drawer.lines = [];
+  openDrawer(task + " / " + name, "log");
+  $("body").textContent = "loading…";
+  await tailLog();
+}
+async function tailLog() {
+  if (drawer.kind !== "log" || !drawer.task) return;
+  const seq = drawer.seq, body = $("body");
+  let r;
+  try { r = await (await fetch(`/api/log?task=${encodeURIComponent(drawer.task)}&name=${encodeURIComponent(drawer.name)}&offset=${drawer.offset}&raw=${drawer.raw ? 1 : 0}`)).json(); }
+  catch { if (seq === drawer.seq) body.textContent = "log unavailable"; return; }
+  if (seq !== drawer.seq) return;
+  if (r.error) { body.textContent = r.error; return; }
+  drawer.offset = r.offset; drawer.lines.push(...r.lines);
+  if (drawer.lines.length > 5000) drawer.lines.splice(0, drawer.lines.length - 5000);
+  if (!r.lines.length && body.childNodes.length) return;
+  const atBottom = $("follow").checked || body.scrollTop + body.clientHeight >= body.scrollHeight - 40;
+  body.innerHTML = drawer.lines.map(l => `<span class="${l.startsWith("▶") ? "l-tool" : l.startsWith("✗") ? "l-err" : l.startsWith("■") ? "l-res" : l.startsWith("·") ? "l-meta" : ""}">${esc(l)}\n</span>`).join("");
+  if (atBottom) body.scrollTop = body.scrollHeight;
+}
+async function showTask(task) {
+  openDrawer(task, "task");
+  const body = $("body"); body.textContent = "loading…";
+  const seq = drawer.seq;
+  let d;
+  try { d = await (await fetch(`/api/task?task=${encodeURIComponent(task)}`)).json(); } catch { body.textContent = "unavailable"; return; }
+  if (seq !== drawer.seq) return;
+  if (d.error) { body.textContent = d.error; return; }
+  const sec = (title, text) => text ? `<h2>${esc(title)}</h2><pre>${esc(text)}</pre>` : "";
+  body.innerHTML = `
+    <div class="chips"><span class="chip">${esc(d.status)}</span><span class="chip">iter ${d.iteration}/${d.max_iterations}</span>${d.branch ? `<span class="chip mono">${esc(d.branch)}</span>` : ""}${d.base_sha ? `<span class="chip mono">base ${esc(d.base_sha.slice(0, 10))}</span>` : ""}<span class="chip mono">${esc(d.repo || "")}</span></div>
+    ${sec("Request", d.request)}
+    ${sec("Spec (pm)", d.spec)}
+    ${d.acceptance_criteria && d.acceptance_criteria.length ? `<h2>Acceptance criteria</h2><ol>${d.acceptance_criteria.map(c => `<li>${esc(c)}</li>`).join("")}</ol>` : ""}
+    ${sec("Plan (architect)", d.plan)}
+    ${sec("Coder summary", d.coder_summary)}
+    ${sec("QA report" + (d.qa_passed == null ? "" : d.qa_passed ? " — passed" : " — FAILED"), d.qa_report)}
+    ${sec("Review" + (d.review_verdict ? " — " + d.review_verdict : ""), d.review_notes)}
+    <h2>Steps</h2><table><thead><tr><th>#</th><th>role</th><th>box</th><th>exit</th><th>took</th><th>cost</th><th>report</th></tr></thead><tbody>${(d.steps || []).map((s, i) => `<tr class="click" data-open="log" data-task="${esc(task)}" data-name="${String(s.attempt).padStart(2, "0")}-${esc(s.role)}.log"><td>${i + 1}</td><td><span class="badge ${esc(s.role)}">${esc(s.role)}</span></td><td class="mono dim">${esc(s.box || "")}</td><td>${esc(s.exit_code)}</td><td class="mono">${dur(s.duration_s)}</td><td class="mono">${s.cost_usd != null ? "$" + s.cost_usd.toFixed(3) : ""}</td><td>${s.parsed_ok ? "ok" : "none"}</td></tr>`).join("")}</tbody></table>`;
+}
+async function showDiff(task) {
+  openDrawer(task + " / diff", "diff");
+  const body = $("body"); body.textContent = "loading…";
+  const seq = drawer.seq;
+  try { const text = await (await fetch(`/api/diff?task=${encodeURIComponent(task)}`)).text(); if (seq === drawer.seq) body.textContent = text; }
+  catch { if (seq === drawer.seq) body.textContent = "unavailable"; }
+}
+function showNew() {
+  openDrawer("new task", "new");
+  const repos = Array.from(new Set((last?.tasks || []).map(t => t.repo).filter(Boolean)));
+  $("body").innerHTML = `<form class="new" id="newform">
+    <label>repository (absolute path)<input name="repo" list="repos" required placeholder="/Users/you/Documents/GitHub/repo"><datalist id="repos">${repos.map(r => `<option value="${esc(r)}">`).join("")}</datalist></label>
+    <label>request<textarea name="request" required placeholder="add a /health endpoint that reports DB status"></textarea></label>
+    <label>task id (optional, [A-Za-z0-9._-])<input name="task_id" pattern="[A-Za-z0-9._-]{1,40}"></label>
+    <label>max coder iterations<input name="max_iterations" type="number" min="1" max="20" value="3"></label>
+    <div><button type="submit">start</button></div></form>`;
+  $("newform").onsubmit = (e) => {
+    e.preventDefault();
+    const f = new FormData(e.target);
+    const spec = { repo: f.get("repo"), request: f.get("request"), task_id: f.get("task_id") || undefined, max_iterations: Number(f.get("max_iterations")) || undefined };
+    act("run", JSON.stringify(spec), true);
+  };
+}
+
+// --- actions --------------------------------------------------------------------------
+const DANGER = { "delete-task": "deletes the task's snapshot, logs and checkpoints (branch and worktree stay)", "purge": "deletes every finished task's snapshot, logs and checkpoints", "cancel": "kills the orchestrator and stops its box; --resume continues later", "stop-box": "stops the box; the graph records a failed step and continues", "remove-worktree": "removes the worktree directory; the branch stays" };
+async function act(action, arg, skipConfirm) {
+  if (!ACTIONS_ON) return;
+  if (!skipConfirm) {
+    if (action === "delete-task" || action === "purge") {
+      const phrase = action === "purge" ? "purge" : arg;
+      if (prompt(`${action} ${arg}\n\n${DANGER[action]}\n\nType "${phrase}" to confirm:`) !== phrase) return;
+    } else if (!confirm(`${action} ${arg || ""}\n\n${DANGER[action] || ""}`)) return;
+  }
+  openDrawer(`${action} ${arg.length > 60 ? "" : arg}`, "action");
+  const body = $("body"); body.textContent = "running…";
+  try {
+    const res = await fetch("/api/action", { method: "POST", headers: { "Content-Type": "application/json", "X-CG-Token": ACTION_TOKEN }, body: JSON.stringify({ action, arg }) });
+    const out = await res.json();
+    body.textContent = (out.ok ? "ok\n\n" : "failed\n\n") + (out.output || "");
+  } catch { body.textContent = "the request failed"; }
+  poll();
+}
+
+// --- wiring ---------------------------------------------------------------------------
+document.addEventListener("click", (e) => {
+  const el = e.target.closest("[data-act],[data-open]");
+  if (!el) return;
+  if (el.dataset.act) return act(el.dataset.act, el.dataset.arg || "");
+  const k = el.dataset.open;
+  if (k === "log") showLog(el.dataset.task, el.dataset.name);
+  else if (k === "task") showTask(el.dataset.task);
+  else if (k === "diff") showDiff(el.dataset.task);
+  else if (k === "new") showNew();
+});
+$("closebtn").onclick = closeDrawer;
+$("rawbtn").onclick = () => { drawer.raw = !drawer.raw; $("rawbtn").textContent = drawer.raw ? "rendered" : "raw"; if (drawer.kind === "log") showLog(drawer.task, drawer.name); };
+$("sizebtn").onclick = () => { const tall = $("drawer").classList.toggle("tall"); $("sizebtn").textContent = tall ? "shrink" : "expand"; store.set("cg-drawer-tall", tall ? "1" : "0"); };
+if (store.get("cg-drawer-tall") === "1") { $("drawer").classList.add("tall"); $("sizebtn").textContent = "shrink"; }
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeDrawer(); });
+$("notify").onclick = () => Notification.requestPermission();
+function notifyDone(tasks) {
+  if (!("Notification" in window) || Notification.permission !== "granted") return;
+  for (const t of tasks) {
+    if (["done", "failed", "exhausted"].includes(t.status) && !seenDone.has(t.task_id)) {
+      if (seenDone.size) new Notification(`claude-graph: ${t.task_id} ${t.status}`, { body: t.next_action });
+      seenDone.add(t.task_id);
+    }
+  }
+  if (!seenDone.size) seenDone.add("__primed__");
+}
+for (const d of document.querySelectorAll("details.sec[id]")) {
+  const key = "cg-sec:" + d.id; const saved = store.get(key);
+  if (saved !== null) d.open = saved === "1";
+  d.addEventListener("toggle", () => store.set(key, d.open ? "1" : "0"));
+}
+poll(); setInterval(poll, 3000); setInterval(tailLog, 2000);
+</script>
+</body>
+</html>

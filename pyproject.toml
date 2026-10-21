@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "claude-graph"
+version = "0.1.0"
+description = "LangGraph harness: architect → coder → qa → reviewer loops, each step a headless Claude Code session in a claude-box sandbox"
+requires-python = ">=3.12"
+dependencies = [
+  "langgraph>=1.2,<2",
+  "langgraph-checkpoint-sqlite>=3,<4",
+  "pydantic>=2,<3",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=9", "ruff>=0.17"]
+
+[project.scripts]
+claude-graph = "claude_graph.cli:main"
+
+[tool.setuptools]
+packages = ["claude_graph", "claude_graph.ui"]
+
+[tool.setuptools.package-data]
+claude_graph = ["roles/*.md", "ui/*.html"]
+
+[tool.ruff]
+line-length = 100
+extend-exclude = ["sandbox"]
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["claude_graph", "fake_runner"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

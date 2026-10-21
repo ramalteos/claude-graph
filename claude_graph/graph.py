@@ -1,0 +1,216 @@
+"""The graph: architect → coder → qa → reviewer, with bounded loops back on failure."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+from langgraph.graph import END, START, StateGraph
+from langgraph.graph.state import CompiledStateGraph
+
+from claude_graph.boxes import BoxResult, BoxRunner
+from claude_graph.reports import (
+    ArchitectReport,
+    CoderReport,
+    PmReport,
+    QaReport,
+    ReviewReport,
+    parse_report,
+)
+from claude_graph.roles import system_prompt, user_prompt
+from claude_graph.state import StepRecord, TaskState
+
+# Judgement-heavy roles get the most capable model; the hands get opus.
+DEFAULT_MODELS = {
+    "pm": "fable",
+    "architect": "fable",
+    "coder": "opus",
+    "qa": "opus",
+    "reviewer": "opus",
+}
+DEFAULT_EFFORT = "high"
+
+
+@dataclass(frozen=True)
+class Settings:
+    models: dict[str, str] = field(default_factory=dict)
+    efforts: dict[str, str] = field(default_factory=dict)
+
+    def model(self, role: str) -> str:
+        return self.models.get(role, DEFAULT_MODELS[role])
+
+    def effort(self, role: str) -> str:
+        return self.efforts.get(role, DEFAULT_EFFORT)
+
+
+def build_graph(
+    runner: BoxRunner, settings: Settings | None = None, checkpointer: Any = None
+) -> CompiledStateGraph:
+    nodes = _Nodes(runner, settings or Settings())
+    g = StateGraph(TaskState)
+    g.add_node("pm", nodes.pm)
+    g.add_node("architect", nodes.architect)
+    g.add_node("coder", nodes.coder)
+    g.add_node("qa", nodes.qa)
+    g.add_node("reviewer", nodes.reviewer)
+    g.add_edge(START, "pm")
+    g.add_conditional_edges("pm", after_pm, {"architect": "architect", END: END})
+    g.add_conditional_edges("architect", after_architect, {"coder": "coder", END: END})
+    g.add_edge("coder", "qa")
+    g.add_conditional_edges("qa", after_qa, {"reviewer": "reviewer", "coder": "coder", END: END})
+    g.add_conditional_edges(
+        "reviewer", after_reviewer, {"coder": "coder", "architect": "architect", END: END}
+    )
+    return g.compile(checkpointer=checkpointer)
+
+
+# --- routing: pure functions of state; the nodes decide, these only read ----------------
+
+
+def after_pm(state: TaskState) -> str:
+    return END if state["status"] == "failed" else "architect"
+
+
+def after_architect(state: TaskState) -> str:
+    return END if state["status"] == "failed" else "coder"
+
+
+def after_qa(state: TaskState) -> str:
+    if state["status"] == "exhausted":
+        return END
+    return "reviewer" if state["qa_passed"] else "coder"
+
+
+def after_reviewer(state: TaskState) -> str:
+    if state["status"] in ("done", "exhausted"):
+        return END
+    return "architect" if state["review_verdict"] == "redesign" else "coder"
+
+
+# --- nodes -------------------------------------------------------------------------------
+
+
+def _attempts(state: TaskState, role: str) -> int:
+    return sum(1 for s in state.get("steps", []) if s["role"] == role)
+
+
+def _box_failed(res: BoxResult) -> bool:
+    return res.exit_code != 0 or res.is_error or res.result_text is None
+
+
+def _tail(text: str | None, limit: int = 2000) -> str:
+    return (text or "")[-limit:]
+
+
+class _Nodes:
+    def __init__(self, runner: BoxRunner, settings: Settings) -> None:
+        self.runner = runner
+        self.settings = settings
+
+    def _run(self, role: str, state: TaskState) -> tuple[BoxResult, int]:
+        attempt = _attempts(state, role) + 1
+        res = self.runner.run(
+            role=role,
+            task_id=state["task_id"],
+            attempt=attempt,
+            repo=Path(state["repo"]),
+            system_prompt=system_prompt(role),
+            prompt=user_prompt(role, state),
+            model=self.settings.model(role),
+            effort=self.settings.effort(role),
+        )
+        return res, attempt
+
+    @staticmethod
+    def _update(
+        state: TaskState, role: str, attempt: int, res: BoxResult, parsed_ok: bool
+    ) -> TaskState:
+        step = StepRecord(
+            role=role,
+            attempt=attempt,
+            box=res.box,
+            exit_code=res.exit_code,
+            duration_s=res.duration_s,
+            cost_usd=res.cost_usd,
+            log_path=str(res.log_path),
+            parsed_ok=parsed_ok,
+        )
+        update = TaskState(steps=[step])
+        # The first box to report the worktree pins it; later ones agree by construction.
+        if res.branch and not state.get("branch"):
+            update.update(
+                branch=res.branch, base_sha=res.base_sha or "", worktree=str(res.worktree or "")
+            )
+        return update
+
+    def pm(self, state: TaskState) -> TaskState:
+        res, attempt = self._run("pm", state)
+        report = parse_report(res.result_text, PmReport)
+        update = self._update(state, "pm", attempt, res, report is not None)
+        if _box_failed(res):
+            update["status"] = "failed"
+            return update
+        update["spec"] = report.spec if report else res.result_text or ""
+        update["acceptance_criteria"] = report.acceptance_criteria if report else []
+        return update
+
+    def architect(self, state: TaskState) -> TaskState:
+        res, attempt = self._run("architect", state)
+        report = parse_report(res.result_text, ArchitectReport)
+        update = self._update(state, "architect", attempt, res, report is not None)
+        if _box_failed(res):
+            update["status"] = "failed"
+            return update
+        update["plan"] = report.plan if report else res.result_text or ""
+        return update
+
+    def coder(self, state: TaskState) -> TaskState:
+        state = {**state, "iteration": state["iteration"] + 1}
+        res, attempt = self._run("coder", state)
+        report = parse_report(res.result_text, CoderReport)
+        update = self._update(state, "coder", attempt, res, report is not None)
+        update["iteration"] = state["iteration"]
+        if report:
+            update["coder_summary"] = report.summary
+        elif _box_failed(res):
+            update["coder_summary"] = (
+                f"coder box failed (exit {res.exit_code}); see its log. " + _tail(res.result_text)
+            )
+        else:
+            update["coder_summary"] = _tail(res.result_text)
+        return update
+
+    def qa(self, state: TaskState) -> TaskState:
+        res, attempt = self._run("qa", state)
+        report = parse_report(res.result_text, QaReport)
+        update = self._update(state, "qa", attempt, res, report is not None)
+        if report:
+            update["qa_passed"], update["qa_report"] = report.passed, report.report
+        else:
+            update["qa_passed"] = False
+            update["qa_report"] = (
+                f"qa gave no verdict (box exit {res.exit_code}). Output tail:\n"
+                + _tail(res.result_text)
+            )
+        if not update["qa_passed"] and state["iteration"] >= state["max_iterations"]:
+            update["status"] = "exhausted"
+        return update
+
+    def reviewer(self, state: TaskState) -> TaskState:
+        res, attempt = self._run("reviewer", state)
+        report = parse_report(res.result_text, ReviewReport)
+        update = self._update(state, "reviewer", attempt, res, report is not None)
+        if report:
+            update["review_verdict"], update["review_notes"] = report.verdict, report.notes
+        else:
+            update["review_verdict"] = "changes"
+            update["review_notes"] = (
+                f"reviewer gave no verdict (box exit {res.exit_code}). Output tail:\n"
+                + _tail(res.result_text)
+            )
+        if update["review_verdict"] == "approve":
+            update["status"] = "done"
+        elif state["iteration"] >= state["max_iterations"]:
+            update["status"] = "exhausted"
+        return update
