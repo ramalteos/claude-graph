@@ -136,3 +136,21 @@ def test_snapshot_carries_updated_at_and_ui_parser(env):
 
     args = parser().parse_args(["ui", "--port", "0"])
     assert args.port == 0 and args.func.__name__ == "cmd_ui"
+
+
+def test_run_from_inside_the_repo_needs_no_path(env, capsys, monkeypatch):
+    tmp, repo = env
+    monkeypatch.chdir(repo)
+    rc = run_cli(
+        "run", "add", "a", "route", "--task-id", "t4", "--engine", "fake", "--runner", FAKE
+    )
+    assert rc == 0
+    snap = json.loads((tmp / "state" / "tasks" / "t4.json").read_text())
+    assert snap["request"] == "add a route" and snap["repo"] == str(repo.resolve())
+
+
+def test_run_outside_a_repo_without_a_path_is_refused(env, capsys, monkeypatch):
+    tmp, _ = env
+    monkeypatch.chdir(tmp)
+    assert run_cli("run", "do it", "--engine", "fake", "--runner", FAKE) == 2
+    assert "not a git repo" in capsys.readouterr().err

@@ -130,3 +130,22 @@ def test_runner_lookup_prefers_submodule_then_sibling(tmp_path, monkeypatch):
     sub.mkdir()
     (sub / "abox").write_text("#!/bin/sh\n")
     assert config.find_claude_box() == sub / "abox"
+
+
+def test_links_claude_graph_itself(tmp_path, sandbox, monkeypatch):
+    import sys as _sys
+
+    venv_bin = tmp_path / "venv" / "bin"
+    venv_bin.mkdir(parents=True)
+    (venv_bin / "claude-graph").write_text("#!/bin/sh\n")
+    monkeypatch.setattr(_sys, "executable", str(venv_bin / "python"))
+    run = FakeRun(
+        {
+            "container system status": (0, "status  running\n", ""),
+            "container image list": (0, "claude-box latest\n", ""),
+        }
+    )
+    r = mod.setup(which=lambda n: "/x/container", run=run, home=tmp_path, env={"PATH": "/usr/bin"})
+    link = tmp_path / ".local" / "bin" / "claude-graph"
+    assert link.is_symlink() and os.readlink(link) == str(venv_bin / "claude-graph")
+    assert sum("export PATH" in t for t in r.todo) == 1

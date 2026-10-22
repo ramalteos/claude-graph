@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -63,6 +64,7 @@ def setup(
         )
         runner = find_claude_box()
         _runner_check(r, runner, home, env)
+        _link_self(r, home, env)
         _login_check(r)
         return r
     r.ok("Apple `container` CLI")
@@ -84,6 +86,7 @@ def setup(
     # 3. the runner
     runner = find_claude_box()
     if not _runner_check(r, runner, home, env):
+        _link_self(r, home, env)
         _login_check(r)
         return r
 
@@ -103,9 +106,26 @@ def setup(
                 f"{runner} build   (failed with exit {build.returncode}; see the output above)",
             )
 
-    # 5. login
+    # 5. this command on PATH, then the login
+    _link_self(r, home, env)
     _login_check(r, runner)
     return r
+
+
+def _link_self(r: Report, home: Path, env: dict[str, str]) -> None:
+    """`claude-graph` on PATH, so it is typed from anywhere and never from inside the venv."""
+    exe = Path(sys.executable).parent / "claude-graph"
+    if not exe.is_file():
+        return
+    link = home / ".local" / "bin" / "claude-graph"
+    if link.exists() or link.is_symlink():
+        r.ok(f"{link} present")
+    else:
+        link.parent.mkdir(parents=True, exist_ok=True)
+        link.symlink_to(exe)
+        r.fixed(f"{link} -> {exe}")
+    if str(link.parent) not in env.get("PATH", "").split(os.pathsep):
+        r.left("~/.local/bin on PATH", 'add to ~/.zshrc:  export PATH="$HOME/.local/bin:$PATH"')
 
 
 def _runner_check(r: Report, runner: Path | None, home: Path, env: dict[str, str]) -> bool:
@@ -127,8 +147,6 @@ def _runner_check(r: Report, runner: Path | None, home: Path, env: dict[str, str
         link.parent.mkdir(parents=True, exist_ok=True)
         link.symlink_to(abox)
         r.fixed(f"{link} -> {abox}")
-    if str(link.parent) not in env.get("PATH", "").split(os.pathsep):
-        r.left("~/.local/bin on PATH", 'add to ~/.zshrc:  export PATH="$HOME/.local/bin:$PATH"')
     return True
 
 

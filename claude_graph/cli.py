@@ -38,8 +38,12 @@ def parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(required=True)
 
     run = sub.add_parser("run", help="run a request through architect → coder → qa → reviewer")
-    run.add_argument("repo", type=Path)
-    run.add_argument("request", nargs="?", help="what you want; omit with --resume")
+    run.add_argument(
+        "words",
+        nargs="*",
+        metavar="[repo] request",
+        help="the repo (default: the current directory) and what you want; omit with --resume",
+    )
     run.add_argument("--task-id", help="[A-Za-z0-9._-]{1,40}; default: a timestamp")
     run.add_argument("--resume", metavar="TASK_ID", help="continue a task from its last checkpoint")
     run.add_argument("--max-iterations", type=int, default=DEFAULT_MAX_ITERATIONS)
@@ -78,8 +82,15 @@ def parser() -> argparse.ArgumentParser:
     return p
 
 
+def _split_target(words: list[str]) -> tuple[Path, str]:
+    """`run <repo> <request…>` or `run <request…>` from inside the repo, like the sandbox CLI."""
+    if words and Path(words[0]).is_dir():
+        return Path(words[0]).resolve(), " ".join(words[1:])
+    return Path.cwd().resolve(), " ".join(words)
+
+
 def cmd_run(args: argparse.Namespace) -> int:
-    repo = args.repo.resolve()
+    repo, request = _split_target(args.words)
     if not (repo / ".git").exists():
         raise CliError(f"not a git repo: {repo}")
     claude_box = args.runner or find_claude_box()
@@ -88,7 +99,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     task_id = args.resume or args.task_id or time.strftime("t%Y%m%d-%H%M%S")
     if not TASK_ID.match(task_id):
         raise CliError(f"task id must match {TASK_ID.pattern}: {task_id!r}")
-    if not args.resume and not args.request:
+    if not args.resume and not request:
         raise CliError("a request is required (or --resume <task-id>)")
 
     root = state_dir()
@@ -111,18 +122,32 @@ def cmd_run(args: argparse.Namespace) -> int:
                 print(summary(final))
                 return 0 if final["status"] == "done" else 1
             print(f"resuming {task_id} at {', '.join(snapshot.next)}", file=sys.stderr)
-            final = _drive(graph, None, config, root)
+            try:
+                final = _drive(graph, None, config, root)
+            except KeyboardInterrupt:
+                print(
+                    f"\ninterrupted; continue later with: claude-graph run --resume {task_id}",
+                    file=sys.stderr,
+                )
+                return 130
         else:
             if graph.get_state(config).values:
                 raise CliError(f"task {task_id} already exists; --resume it or pick another id")
             state = initial_state(
                 task_id=task_id,
-                request=args.request,
+                request=request,
                 repo=str(repo),
                 max_iterations=args.max_iterations,
             )
             print(f"task {task_id} on {repo} (engine {args.engine})", file=sys.stderr)
-            final = _drive(graph, state, config, root)
+            try:
+                final = _drive(graph, state, config, root)
+            except KeyboardInterrupt:
+                print(
+                    f"\ninterrupted; continue later with: claude-graph run --resume {task_id}",
+                    file=sys.stderr,
+                )
+                return 130
     print(summary(final))
     return 0 if final["status"] == "done" else 1
 

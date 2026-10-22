@@ -22,14 +22,16 @@ already keeps. The orchestrator never talks to the container engine itself.
 ## Quick start
 
 ```sh
-cd ~/Documents/GitHub/claude-graph
-.venv/bin/claude-graph setup                                  # must end with "everything is in place"
-.venv/bin/claude-graph ui --actions &                         # dashboard: http://127.0.0.1:8765/
-.venv/bin/claude-graph run ~/Documents/GitHub/<repo> "<what you want done>"
+claude-graph setup                                # once per machine; must end with "everything is in place"
+claude-graph ui --actions &                       # dashboard: http://127.0.0.1:8765/
+cd ~/Documents/GitHub/<repo>
+claude-graph run "<what you want done>"           # or: claude-graph run <repo> "<request>" from anywhere
 ```
 
-`setup` lists anything missing with the command that fixes it; the one step it cannot
-do for you is the sandbox login (`abox <repo>`, then `/login`, `/exit`). Details below.
+`setup` puts `claude-graph` and `abox` on your PATH and lists anything missing with the
+command that fixes it; the one step it cannot do for you is the sandbox login
+(`abox <repo>`, then `/login`, `/exit`). Ctrl-C during a run stops the box; continue later
+with `claude-graph run --resume <task-id>`. Details below.
 
 ## Setup (once)
 
@@ -47,7 +49,8 @@ cd ~/Documents/GitHub/claude-graph
 ```
 
 `setup` starts the `container` daemon, builds the sandbox image for that engine (a few
-minutes, once), links `abox` into `~/.local/bin`, and checks the sandbox login. It prints
+minutes, once), links `claude-graph` and `abox` into `~/.local/bin`, and checks the
+sandbox login. It prints
 one line per item — `ok`, `fixed`, or `TODO` with the exact command — and exits 1 while
 anything is left. Re-run it until it is quiet. The two things only a human can do:
 
@@ -97,8 +100,12 @@ Two terminals. First the dashboard, then the run:
 
 ```sh
 claude-graph ui --actions                              # terminal 1 → http://127.0.0.1:8765/
-claude-graph run ~/Documents/GitHub/<repo> "add a /health endpoint that reports DB status"
+cd ~/Documents/GitHub/<repo>                           # terminal 2
+claude-graph run "add a /health endpoint that reports DB status"
 ```
+
+`claude-graph run <repo> "<request>"` works from anywhere; without a path the current
+directory is the repo, as with the sandbox CLI.
 
 What happens: a worktree on branch `claude-graph/<task-id>` is cut from the repo's HEAD
 inside a box; then one box per role
@@ -115,7 +122,8 @@ claude-graph logs health-route                        # every box log for the ta
 claude-graph logs health-route qa                     # the latest QA log
 ```
 
-`run` exits 0 on `done`, 1 on `exhausted`/`failed`, 2 on a usage error.
+`run` exits 0 on `done`, 1 on `exhausted`/`failed`, 2 on a usage error, 130 on Ctrl-C
+(the box is stopped; `--resume` continues from the last finished node).
 
 ## Take the result
 

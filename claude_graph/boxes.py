@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Protocol
 
 TIMEOUT_EXIT = 124  # what `timeout(1)` reports; a stopped box is reported the same way
+INTERRUPT_EXIT = 130  # the shell convention for SIGINT
 BOX_PREFIX = "claude-box-"  # the runner prepends this to every --name
 BRANCH_PREFIX = "claude-graph/"  # branches this harness cuts
 
@@ -126,6 +127,13 @@ class ClaudeBoxRunner:
                 # Killing the client does not stop the container on every engine.
                 self._stop(BOX_PREFIX + name)
                 exit_code = TIMEOUT_EXIT
+            except KeyboardInterrupt:
+                # Apple `container` cannot forward SIGINT to the box; stop it ourselves and
+                # close the record, or the dashboard shows this box as running forever.
+                self._stop(BOX_PREFIX + name)
+                meta_body.update(finished=_now(), exit_code=INTERRUPT_EXIT, interrupted=True)
+                meta.write_text(json.dumps(meta_body))
+                raise
         result = read_log(log, exit_code=exit_code, duration_s=time.monotonic() - started)
         meta_body.update(
             finished=_now(),

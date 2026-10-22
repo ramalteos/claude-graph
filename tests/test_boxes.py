@@ -100,3 +100,25 @@ def test_meta_sidecar_is_written_before_and_after(tmp_path, argv_file, monkeypat
     assert meta["model"] == "opus" and meta["log"] == "01-coder.log"
     assert meta["started"] <= meta["finished"]
     assert meta["exit_code"] == 0 and meta["cost_usd"] == 0.0123
+
+
+def test_ctrl_c_stops_the_box_and_closes_its_record(tmp_path, argv_file, monkeypatch):
+    import subprocess as sp
+
+    from claude_graph import boxes as mod
+
+    def interrupted(*a, **kw):
+        raise KeyboardInterrupt
+
+    real_run = sp.run
+    monkeypatch.setattr(
+        mod.subprocess,
+        "run",
+        lambda argv, **kw: real_run(argv, **kw) if argv[1] == "stop" else interrupted(),
+    )
+    with pytest.raises(KeyboardInterrupt):
+        run_coder(tmp_path)
+    stop = calls(tmp_path / "argv.stop")[0]
+    assert stop[2:] == ["stop", "claude-box-graph-t1-coder-1"]
+    meta = json.loads((tmp_path / "logs" / "t1" / "01-coder.meta.json").read_text())
+    assert meta["exit_code"] == 130 and meta["interrupted"] is True and "finished" in meta

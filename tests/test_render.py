@@ -75,3 +75,32 @@ def test_long_tool_input_is_cut():
     }
     line = render_event(event)[0]
     assert len(line) < 200 and line.endswith("…")
+
+
+def test_tool_result_without_text_does_not_crash():
+    refs = {
+        "type": "user",
+        "message": {
+            "content": [
+                {
+                    "type": "tool_result",
+                    "content": [
+                        {"type": "tool_reference", "tool_name": "mcp__jira__getIssue"},
+                        {"type": "tool_reference", "tool_name": "mcp__jira__search"},
+                    ],
+                }
+            ]
+        },
+    }
+    assert render_event(refs) == ["  ↳ [tool mcp__jira__getIssue] [tool mcp__jira__search]"]
+    blank = {"type": "user", "message": {"content": [{"type": "tool_result", "content": "\n \n"}]}}
+    assert render_event(blank) == ["  ↳ "]
+
+
+def test_progress_system_events_are_silent():
+    assert (
+        render_event({"type": "system", "subtype": "thinking_tokens", "estimated_tokens": 50}) == []
+    )
+    assert render_event({"type": "system", "subtype": "init", "session_id": "s", "model": "m"}) == [
+        "· session s · model m"
+    ]

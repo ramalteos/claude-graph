@@ -104,8 +104,9 @@ class Store:
             running = next((m for m in metas if "finished" not in m), None)
             pid = self.pid(task_id)
             status = snap.get("status", "starting")
-            if status == "running" and not pid and not running:
-                status = "stopped"  # the orchestrator died mid-task; --resume continues it
+            if status in ("running", "starting") and not pid:
+                status = "stopped"  # the orchestrator is gone; --resume continues the task
+                running = None  # an open box record without an orchestrator is stale
             steps = snap.get("steps", [])
             out.append(
                 {
@@ -140,8 +141,11 @@ class Store:
         )
 
     def boxes(self) -> list[dict]:
+        """Boxes in flight: an open record whose orchestrator is still alive."""
         out = []
         for task_id in self.task_ids():
+            if not self.pid(task_id):
+                continue
             for m in self.metas(task_id):
                 if "finished" not in m:
                     out.append(_box_view(task_id, m))
@@ -356,7 +360,10 @@ def _next_action(status: str, snap: dict, running: dict | None) -> str:
             "open its log, then resume"
         )
     if status == "stopped":
-        return "orchestrator is not running — resume to continue from the last finished step"
+        return (
+            "orchestrator is not running (Ctrl-C or crash) — "
+            "resume to continue from the last finished step"
+        )
     return "waiting for the next node"
 
 

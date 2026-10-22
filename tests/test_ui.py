@@ -137,6 +137,17 @@ def world(tmp_path, monkeypatch):
     return state, tmp_path
 
 
+@pytest.fixture
+def alive(world):
+    """An orchestrator that is alive: a sleeping child whose pid is on record for t1."""
+    state, _ = world
+    proc = subprocess.Popen(["sleep", "60"])
+    (state / "tasks" / "t1.pid").write_text(str(proc.pid))
+    yield proc
+    proc.kill()
+    proc.wait()
+
+
 def start(ctx):
     server = serve(ctx, port=0)
     threading.Thread(target=server.serve_forever, daemon=True).start()
@@ -211,7 +222,7 @@ def test_index_without_actions_has_no_token(ui):
     assert 'ACTION_TOKEN = ""' in body
 
 
-def test_state_has_every_section(ui):
+def test_state_has_every_section(ui, alive):
     base, _, tmp = ui
     s = json.loads(get(base + "/api/state")[1])
     assert s["api_version"] == 1 and s["engine"] == "fake"
@@ -225,6 +236,7 @@ def test_state_has_every_section(ui):
         "branch_exists": True,
     }
     assert "qa is in a box" in t["next_action"]
+    assert t["pid"] == alive.pid
     assert [b["role"] for b in s["boxes"]] == ["qa"]
     assert s["boxes"][0]["elapsed_s"] > 0
     assert s["attention"][0]["kind"] == "login"
@@ -237,12 +249,11 @@ def test_state_has_every_section(ui):
 
 
 def test_dead_orchestrator_shows_as_stopped_with_resume_hint(ui):
-    base, state, _ = ui
-    (state / "logs" / "t1" / "01-qa.meta.json").write_text(
-        json.dumps({"role": "qa", "attempt": 1, "started": "x", "finished": "y", "exit_code": 0})
-    )
+    base, state, _ = ui  # no pid file: the orchestrator is gone, the qa record is still open
     s = json.loads(get(base + "/api/state")[1])
-    assert s["tasks"][0]["status"] == "stopped"
+    t = s["tasks"][0]
+    assert t["status"] == "stopped" and t["running"] is None
+    assert s["boxes"] == []  # a stale record is not "in flight"
     assert any(a["kind"] == "task" and "resume" in a["text"] for a in s["attention"])
 
 
@@ -386,3 +397,19 @@ def test_purge_keeps_running_tasks(ui_actions):
     _, out = post(base, "purge", "", ctx.token)
     assert out["ok"] and "purged 1 task(s); kept running: t1" == out["output"]
     assert not (state / "tasks" / "t3.json").exists() and (state / "tasks" / "t1.json").exists()
+
+
+def test_cancel_kills_the_orchestrator_and_stops_its_box(ui_actions, alive):
+    base, state, tmp, ctx = ui_actions
+    _, out = post(base, "cancel", "t1", ctx.token)
+    assert out["ok"], out
+    assert f"SIGTERM to orchestrator pid {alive.pid}" in out["output"]
+    alive.wait(timeout=5)
+    assert alive.returncode is not None
+    assert "claude-box-graph-t1-qa-1" in (tmp / "argv.stop").read_text()
+
+
+def test_resume_refuses_a_live_task(ui_actions, alive):
+    base, _, _, ctx = ui_actions
+    _, out = post(base, "resume", "t1", ctx.token)
+    assert not out["ok"] and "already running" in out["output"]

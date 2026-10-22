@@ -24,6 +24,8 @@ def render_log(text: str) -> list[str]:
 def render_event(event: dict[str, Any]) -> list[str]:
     kind = event.get("type")
     if kind == "system":
+        if event.get("subtype") not in (None, "init"):
+            return []  # thinking_tokens and friends: progress noise, not content
         return [f"· session {event.get('session_id', '?')} · model {event.get('model', '?')}"]
     if kind == "assistant":
         return [line for block in _blocks(event) for line in _assistant_block(block)]
@@ -59,9 +61,16 @@ def _tool_result(block: dict[str, Any]) -> list[str]:
         return []
     content = block.get("content")
     if isinstance(content, list):
-        content = " ".join(str(c.get("text", "")) for c in content if isinstance(c, dict))
-    text = _short(str(content or "").strip().splitlines()[0] if content else "", 160)
+        content = " ".join(_block_text(c) for c in content if isinstance(c, dict))
+    lines = str(content or "").strip().splitlines()
+    text = _short(lines[0] if lines else "", 160)
     return [f"✗ tool error: {text}"] if block.get("is_error") else [f"  ↳ {text}"]
+
+
+def _block_text(block: dict[str, Any]) -> str:
+    if block.get("type") == "tool_reference":
+        return f"[tool {block.get('tool_name', '?')}]"
+    return str(block.get("text", ""))
 
 
 def _short(text: str, limit: int) -> str:
