@@ -19,6 +19,18 @@ START → pm → architect → coder → qa ──pass──→ reviewer ──a
 No Anthropic API key is involved: the boxes use the Claude Code login that the sandbox
 already keeps. The orchestrator never talks to the container engine itself.
 
+## Quick start
+
+```sh
+cd ~/Documents/GitHub/claude-graph
+.venv/bin/claude-graph setup                                  # must end with "everything is in place"
+.venv/bin/claude-graph ui --actions &                         # dashboard: http://127.0.0.1:8765/
+.venv/bin/claude-graph run ~/Documents/GitHub/<repo> "<what you want done>"
+```
+
+`setup` lists anything missing with the command that fixes it; the one step it cannot
+do for you is the sandbox login (`abox <repo>`, then `/login`, `/exit`). Details below.
+
 ## Setup (once)
 
 Prerequisites: macOS 26 or newer on Apple Silicon, Homebrew, a Claude account that
