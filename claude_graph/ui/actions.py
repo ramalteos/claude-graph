@@ -1,8 +1,8 @@
-"""The actions the page may trigger. Each one is the CLI or claude-box, never a second
-implementation; every argument is validated here before anything is spent."""
+"""Page actions: each is the CLI or the runner, validated here before anything is spent."""
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
@@ -16,7 +16,7 @@ from pathlib import Path
 from claude_graph.state import TASK_ID
 from claude_graph.ui.data import Store
 
-BOX_NAME = re.compile(r"^claude-box-graph-[A-Za-z0-9._-]{1,80}$")
+BOX_NAME = re.compile(r"^claude-box-graph-[A-Za-z0-9._-]{1,80}\Z")
 SUPPORTED = ("run", "resume", "stop-box", "cancel", "remove-worktree", "delete-task", "purge")
 
 
@@ -50,19 +50,19 @@ class Actions:
             return _no(f"not a git repo: {repo}")
         if not request:
             return _no("request is empty")
-        argv = ["run", str(repo.resolve()), request]
+        options: list[str] = []
         if task_id:
             if not TASK_ID.match(task_id):
                 return _no(f"task id must match {TASK_ID.pattern}")
             if self.store.snapshot(task_id):
                 return _no(f"task {task_id} already exists")
-            argv += ["--task-id", task_id]
+            options += ["--task-id", task_id]
         max_iter = spec.get("max_iterations")
         if max_iter is not None:
             if not (isinstance(max_iter, int) and 1 <= max_iter <= 20):
                 return _no("max_iterations must be an integer from 1 to 20")
-            argv += ["--max-iterations", str(max_iter)]
-        return self._spawn(argv, task_id or "(timestamp id)")
+            options += ["--max-iterations", str(max_iter)]
+        return self._spawn(options, [str(repo.resolve()), request], task_id or "(timestamp id)")
 
     def _resume(self, task_id: str) -> dict:
         if not TASK_ID.match(task_id):
@@ -74,26 +74,33 @@ class Actions:
             return _no(f"task {task_id} is already running")
         if snap.get("status") == "done":
             return _no(f"task {task_id} is done; nothing to resume")
-        return self._spawn(["run", snap["repo"], "--resume", task_id], task_id)
+        if snap.get("status") == "exhausted":
+            cap = snap.get("max_iterations")
+            return _no(
+                f"task {task_id} exhausted its {cap} coder runs; resume from a terminal with "
+                f"--max-iterations > {cap}"
+            )
+        return self._spawn(["--resume", task_id], [snap["repo"]], task_id)
 
-    def _spawn(self, argv: list[str], label: str) -> dict:
+    def _spawn(self, options: list[str], positionals: list[str], label: str) -> dict:
+        """`claude-graph run <options> -- <positionals>`; `--` protects a leading-dash request."""
         base = self.runner_argv or [sys.executable, "-m", "claude_graph.cli"]
-        full = [*base, *argv, "--engine", self.engine]
+        full = [*base, "run", *options, "--engine", self.engine]
         if self.claude_box:
             full += ["--runner", str(self.claude_box)]
+        full += ["--", *positionals]
         out_dir = self.store.state_dir / "runs"
         out_dir.mkdir(parents=True, exist_ok=True)
-        out = (out_dir / f"{label.replace('(', '').replace(')', '').replace(' ', '-')}.out").open(
-            "ab"
-        )
-        proc = subprocess.Popen(
-            full,
-            stdin=subprocess.DEVNULL,
-            stdout=out,
-            stderr=subprocess.STDOUT,
-            start_new_session=True,
-            env=os.environ.copy(),
-        )
+        out_path = out_dir / f"{label.replace('(', '').replace(')', '').replace(' ', '-')}.out"
+        with out_path.open("ab") as out:  # the child inherits the fd; ours closes here
+            proc = subprocess.Popen(
+                full,
+                stdin=subprocess.DEVNULL,
+                stdout=out,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+                env=os.environ.copy(),
+            )
         return {"ok": True, "output": f"started {label} (pid {proc.pid})\n{' '.join(full)}"}
 
     # --- stopping work -----------------------------------------------------------------
@@ -106,16 +113,18 @@ class Actions:
         if not TASK_ID.match(task_id):
             return _no("bad task id")
         pid = self.store.pid(task_id)
-        notes = []
+        notes, ok = [], True
         if pid:
-            os.kill(pid, signal.SIGTERM)
-            notes.append(f"sent SIGTERM to orchestrator pid {pid}")
-        for m in self.store.metas(task_id):
-            if "finished" not in m and m.get("box") and BOX_NAME.match(m["box"]):
-                notes.append(
-                    self._claude_box(["stop", m["box"]])["output"].strip() or f"stopped {m['box']}"
-                )
-        return {"ok": True, "output": "\n".join(notes) or "nothing was running"}
+            try:
+                os.kill(pid, signal.SIGTERM)
+                notes.append(f"sent SIGTERM to orchestrator pid {pid}")
+            except ProcessLookupError:  # it exited between the check and the signal
+                notes.append(f"orchestrator pid {pid} already gone")
+        for box in self._open_boxes(task_id):
+            note, stopped = self._stop_box_note(box)
+            notes.append(note)
+            ok = ok and stopped
+        return {"ok": ok, "output": "\n".join(notes) or "nothing was running"}
 
     # --- cleaning up -------------------------------------------------------------------
     def _remove_worktree(self, task_id: str) -> dict:
@@ -131,29 +140,52 @@ class Actions:
     def _delete_task(self, task_id: str) -> dict:
         if not TASK_ID.match(task_id):
             return _no("bad task id")
-        if self.store.pid(task_id) or any("finished" not in m for m in self.store.metas(task_id)):
+        if self.store.pid(task_id):
+            return _no(f"task {task_id} is still running — cancel it first")
+        notes = self._stop_stale_boxes(task_id)
+        if self.store.pid(task_id):  # resumed while the stops ran
             return _no(f"task {task_id} is still running — cancel it first")
         removed = self._forget(task_id)
         return {
             "ok": True,
-            "output": f"deleted {task_id}: {removed}. The branch and worktree are untouched.",
+            "output": "\n".join(
+                [*notes, f"deleted {task_id}: {removed}. The branch and worktree are untouched."]
+            ),
         }
 
     def _purge(self, _: str) -> dict:
-        kept, removed = [], []
+        kept, removed, notes = [], [], []
         for task_id in self.store.task_ids():
-            if self.store.pid(task_id) or any(
-                "finished" not in m for m in self.store.metas(task_id)
-            ):
+            if self.store.pid(task_id):
                 kept.append(task_id)
             else:
+                notes += self._stop_stale_boxes(task_id)
                 self._forget(task_id)
                 removed.append(task_id)
-        return {
-            "ok": True,
-            "output": f"purged {len(removed)} task(s)"
-            + (f"; kept running: {', '.join(kept)}" if kept else ""),
-        }
+        head = f"purged {len(removed)} task(s)" + (
+            f"; kept running: {', '.join(kept)}" if kept else ""
+        )
+        return {"ok": True, "output": "\n".join([head, *notes])}
+
+    def _open_boxes(self, task_id: str) -> list[str]:
+        """Boxes whose record never got `finished`."""
+        return [
+            m["box"]
+            for m in self.store.metas(task_id)
+            if "finished" not in m and m.get("box") and BOX_NAME.match(m["box"])
+        ]
+
+    def _stop_stale_boxes(self, task_id: str) -> list[str]:
+        """Stop boxes left open by a dead orchestrator (SIGKILL, crash), best effort."""
+        return [self._stop_box_note(box, "stale box")[0] for box in self._open_boxes(task_id)]
+
+    def _stop_box_note(self, box: str, kind: str = "box") -> tuple[str, bool]:
+        """`abox stop` plus a one-line note of what happened."""
+        res = self._claude_box(["stop", box])
+        if res["ok"]:
+            return f"stopped {kind} {box}", True
+        tail = res["output"].strip()[-200:]
+        return f"could not stop {kind} {box} ({tail}); check the engine panel", False
 
     def _forget(self, task_id: str) -> str:
         root = self.store.state_dir
@@ -174,25 +206,28 @@ class Actions:
             bits.append("logs/")
         db = root / "checkpoints.sqlite"
         if db.is_file():
-            with sqlite3.connect(db) as conn:
-                for table in ("checkpoints", "writes"):
-                    try:
+            try:
+                with contextlib.closing(sqlite3.connect(db, timeout=1)) as conn, conn:
+                    for table in ("checkpoints", "writes"):
                         conn.execute(f"DELETE FROM {table} WHERE thread_id = ?", (task_id,))  # noqa: S608
-                    except sqlite3.OperationalError:
-                        continue
-            bits.append("checkpoints")
+                bits.append("checkpoints")
+            except sqlite3.OperationalError as e:  # locked by a live run, or no such table yet
+                bits.append(f"checkpoints: {e}, left in place")
         return ", ".join(bits) or "nothing on disk"
 
     def _claude_box(self, args: list[str]) -> dict:
         if not self.claude_box:
-            return _no("claude-box not configured")
-        proc = subprocess.run(
-            [str(self.claude_box), *args],
-            capture_output=True,
-            text=True,
-            timeout=600,
-            env={**os.environ, "CLAUDE_BOX_ENGINE": self.engine},
-        )
+            return _no("runner not configured")
+        try:
+            proc = subprocess.run(
+                [str(self.claude_box), *args],
+                capture_output=True,
+                text=True,
+                timeout=600,
+                env={**os.environ, "CLAUDE_BOX_ENGINE": self.engine},
+            )
+        except (OSError, subprocess.TimeoutExpired) as e:
+            return _no(f"{self.claude_box} {' '.join(args)}: {e}")
         return {"ok": proc.returncode == 0, "output": (proc.stdout + proc.stderr)[-4000:]}
 
 

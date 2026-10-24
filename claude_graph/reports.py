@@ -37,17 +37,26 @@ class ReviewReport(_Report):
     notes: str
 
 
-_FENCE = re.compile(r"```json[ \t]*\n(.*?)\n[ \t]*```", re.DOTALL | re.IGNORECASE)
+_OPEN = re.compile(r"```json\b", re.IGNORECASE)
+_CLOSE = re.compile(r"```")
 
 
 def parse_report[T: _Report](text: str | None, model: type[T]) -> T | None:
-    """The last fenced json block in `text` as `model`, or None when there is no valid one."""
+    """The last fenced json block in `text` as `model`, or None.
+
+    Starts at the last ```json fence; closing fences are tried from the end backwards, so
+    fences quoted inside strings or a stray fence after the block do not lose the report.
+    """
     if not text:
         return None
-    blocks = _FENCE.findall(text)
-    if not blocks:
+    opens = list(_OPEN.finditer(text))
+    if not opens:
         return None
-    try:
-        return model.model_validate(json.loads(blocks[-1]))
-    except (json.JSONDecodeError, ValidationError):
-        return None
+    rest = text[opens[-1].end() :]
+    for close in reversed(list(_CLOSE.finditer(rest))):
+        try:
+            # strict=False: models leave raw newlines inside markdown strings
+            return model.model_validate(json.loads(rest[: close.start()].strip(), strict=False))
+        except (json.JSONDecodeError, ValidationError):
+            continue
+    return None

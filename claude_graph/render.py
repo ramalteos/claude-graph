@@ -5,12 +5,14 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from claude_graph.boxes import split_lines
+
 _INPUT_KEYS = ("command", "file_path", "pattern", "path", "description", "prompt", "url")
 
 
 def render_log(text: str) -> list[str]:
     lines: list[str] = []
-    for raw in text.splitlines():
+    for raw in split_lines(text):
         if raw.startswith("{"):
             try:
                 lines.extend(render_event(json.loads(raw)))
@@ -34,7 +36,7 @@ def render_event(event: dict[str, Any]) -> list[str]:
     if kind == "result":
         cost = event.get("total_cost_usd")
         head = f"■ {event.get('subtype', 'result')} · {event.get('num_turns', '?')} turns"
-        if cost is not None:
+        if isinstance(cost, int | float) and not isinstance(cost, bool):
             head += f" · ${cost:.4f}"
         text = event.get("result") or ""
         return [head, *text.splitlines()]

@@ -52,3 +52,43 @@ def test_fence_language_is_case_insensitive():
 
 def test_unfenced_json_is_not_a_report():
     assert parse_report('{"plan": "p"}', ArchitectReport) is None
+
+
+def test_raw_newlines_inside_json_strings_are_accepted():
+    from claude_graph.reports import QaReport, parse_report
+
+    text = 'Done.\n```json\n{"passed": false, "report": "line one\nline two"}\n```'
+    r = parse_report(text, QaReport)
+    assert r is not None and r.passed is False and r.report == "line one\nline two"
+
+
+def test_a_one_line_fence_is_still_a_block():
+    from claude_graph.reports import CoderReport, parse_report
+
+    r = parse_report('ok ```json {"summary": "s"} ```', CoderReport)
+    assert r is not None and r.summary == "s"
+
+
+def test_a_fenced_snippet_inside_the_report_string_does_not_end_the_block():
+    from claude_graph.reports import ArchitectReport, parse_report
+
+    plan = "Run:\\n```bash\\nls\\n```\\nthen stop"  # escaped newlines, literal fences, valid JSON
+    text = 'Plan below.\n```json\n{"plan": "' + plan + '"}\n```'
+    r = parse_report(text, ArchitectReport)
+    assert r is not None and "```bash" in r.plan
+
+
+def test_a_raw_fence_inside_a_lenient_string_still_parses():
+    from claude_graph.reports import QaReport, parse_report
+
+    text = '```json\n{"passed": true, "report": "see\n```\nlog\n```\ndone"}\n```'
+    r = parse_report(text, QaReport)
+    assert r is not None and r.passed is True and "log" in r.report
+
+
+def test_the_last_json_block_wins_even_with_a_trailing_plain_fence():
+    from claude_graph.reports import CoderReport, parse_report
+
+    text = '```json\n{"summary": "first"}\n```\n```json\n{"summary": "last"}\n```\n```\nnotes\n```'
+    r = parse_report(text, CoderReport)
+    assert r is not None and r.summary == "last"

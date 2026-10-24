@@ -1,10 +1,13 @@
 import json
+import os
 import subprocess
+import sys
+import time
 from pathlib import Path
 
 import pytest
 
-from claude_graph.cli import main
+from claude_graph.cli import main, parser
 
 FAKE = Path(__file__).parent / "fake_claude_box.sh"
 
@@ -154,3 +157,245 @@ def test_run_outside_a_repo_without_a_path_is_refused(env, capsys, monkeypatch):
     monkeypatch.chdir(tmp)
     assert run_cli("run", "do it", "--engine", "fake", "--runner", FAKE) == 2
     assert "not a git repo" in capsys.readouterr().err
+
+
+def test_a_request_starting_with_a_plain_directory_name_is_not_a_repo(env, monkeypatch):
+    tmp, repo = env
+    (repo / "docs").mkdir()
+    monkeypatch.chdir(repo)
+    rc = run_cli(
+        "run", "docs", "fix", "typo", "--task-id", "t5", "--engine", "fake", "--runner", FAKE
+    )
+    assert rc == 0
+    snap = json.loads((tmp / "state" / "tasks" / "t5.json").read_text())
+    assert snap["request"] == "docs fix typo" and snap["repo"] == str(repo.resolve())
+
+
+def test_sigterm_closes_the_box_record_and_exits_130(env):
+    tmp, repo = env
+    argv = [sys.executable, "-m", "claude_graph.cli", "run", str(repo), "x", "--task-id", "tsig"]
+    argv += ["--engine", "fake", "--runner", str(FAKE)]
+    proc = subprocess.Popen(
+        argv,
+        env={**os.environ, "FAKE_SLEEP": "20"},
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    meta = tmp / "state" / "logs" / "tsig" / "01-pm.meta.json"
+    started = tmp / "argv.headless"  # the fake records its argv before anything else
+    try:
+        deadline = time.time() + 15
+        while not (meta.exists() and started.exists()) and time.time() < deadline:
+            time.sleep(0.05)
+        assert meta.exists() and started.exists()
+        proc.terminate()
+        _, err = proc.communicate(timeout=15)
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+    assert proc.returncode == 130, err
+    body = json.loads(meta.read_text())
+    assert body.get("interrupted") and "finished" in body
+    assert "claude-box-graph-tsig-pm-1" in (tmp / "argv.stop").read_text()
+    assert not (tmp / "state" / "tasks" / "tsig.pid").exists()
+    assert "claude-graph run --resume tsig" in err
+
+
+def test_a_path_to_a_plain_directory_is_still_refused(env, capsys, monkeypatch):
+    tmp, repo = env
+    (repo / "docs").mkdir()
+    monkeypatch.chdir(repo)
+    rc = run_cli("run", "./docs", "fix", "typo", "--engine", "fake", "--runner", FAKE)
+    assert rc == 2
+    assert "not a git repo" in capsys.readouterr().err
+
+
+def test_the_module_runs_as_main_like_the_dashboard_spawns_it():
+    proc = subprocess.run(
+        [sys.executable, "-m", "claude_graph.cli", "--help"], capture_output=True, text=True
+    )
+    assert proc.returncode == 0 and "usage: claude-graph" in proc.stdout
+
+
+def test_unknown_engine_is_rejected_up_front(capsys):
+    with pytest.raises(SystemExit) as e:
+        parser().parse_args(["run", "x", "--engine", "bogus"])
+    assert e.value.code == 2 and "invalid choice" in capsys.readouterr().err
+
+
+def test_a_runner_that_is_not_executable_is_refused(env, capsys):
+    tmp, repo = env
+    dud = tmp / "dud.sh"
+    dud.write_text("#!/bin/sh\n")  # mode 644: a file, not a program
+    rc = run_cli("run", repo, "x", "--engine", "fake", "--runner", dud)
+    assert rc == 2 and "not executable" in capsys.readouterr().err
+
+
+def test_term_and_hangup_become_interrupts_but_nohup_is_respected():
+    import signal
+
+    from claude_graph import cli
+
+    old_hup = signal.signal(signal.SIGHUP, signal.SIG_IGN)  # what nohup leaves behind
+    term_before = signal.getsignal(signal.SIGTERM)  # whatever the host (CI wrapper, plugin) set
+    try:
+        previous = cli._interrupt_on_signals()
+        try:
+            assert signal.getsignal(signal.SIGHUP) is signal.SIG_IGN
+            term = signal.getsignal(signal.SIGTERM)
+            with pytest.raises(KeyboardInterrupt):
+                term(signal.SIGTERM, None)
+        finally:
+            cli._restore_signals(previous)
+        assert signal.getsignal(signal.SIGTERM) is term_before
+        signal.signal(signal.SIGHUP, signal.SIG_DFL)
+        previous = cli._interrupt_on_signals()
+        try:
+            with pytest.raises(KeyboardInterrupt):
+                signal.getsignal(signal.SIGHUP)(signal.SIGHUP, None)
+        finally:
+            cli._restore_signals(previous)
+    finally:
+        signal.signal(signal.SIGHUP, old_hup)
+
+
+def test_a_tilde_word_for_an_unknown_user_is_request_text(env, monkeypatch):
+    tmp, repo = env
+    monkeypatch.chdir(repo)
+    rc = run_cli(
+        "run", "~50%", "faster", "please", "--task-id", "t6", "--engine", "fake", "--runner", FAKE
+    )
+    assert rc == 0
+    snap = json.loads((tmp / "state" / "tasks" / "t6.json").read_text())
+    assert snap["request"] == "~50% faster please"
+
+
+def test_restoring_a_handler_python_never_saw_is_a_no_op():
+    import signal
+
+    from claude_graph import cli
+
+    before = signal.getsignal(signal.SIGTERM)
+    cli._restore_signals({signal.SIGTERM: None})
+    assert signal.getsignal(signal.SIGTERM) is before
+
+
+def _names(tmp):
+    argv = (tmp / "argv.headless").read_text()
+    return [ln for ln in argv.splitlines() if ln.startswith("graph-")]
+
+
+def test_resume_after_a_failed_box_retries_that_role(env, capsys, monkeypatch):
+    tmp, repo = env
+    monkeypatch.setenv("FAKE_EXIT", "1")
+    assert run_cli("run", repo, "x", "--task-id", "t1", "--engine", "fake", "--runner", FAKE) == 1
+    assert "task t1: failed" in capsys.readouterr().out
+    monkeypatch.delenv("FAKE_EXIT")
+    rc = run_cli("run", repo, "--resume", "t1", "--engine", "fake", "--runner", FAKE)
+    assert rc == 0, capsys.readouterr()
+    assert "task t1: done" in capsys.readouterr().out
+    assert _names(tmp)[:3] == ["graph-t1-pm-1", "graph-t1-pm-2", "graph-t1-architect-1"]
+
+
+def test_resume_after_exhaustion_needs_a_higher_cap(env, capsys, monkeypatch):
+    tmp, repo = env
+    failing = json.dumps(
+        '```json\n{"spec":"s","acceptance_criteria":[],"plan":"p","summary":"s","passed":false,"report":"r"}\n```'
+    )
+    monkeypatch.setenv("FAKE_RESULT", failing)
+    rc = run_cli(
+        "run",
+        repo,
+        "x",
+        "--task-id",
+        "t1",
+        "--max-iterations",
+        "1",
+        "--engine",
+        "fake",
+        "--runner",
+        FAKE,
+    )
+    assert rc == 1 and "task t1: exhausted" in capsys.readouterr().out
+    rc = run_cli("run", repo, "--resume", "t1", "--engine", "fake", "--runner", FAKE)
+    assert rc == 2 and "--max-iterations" in capsys.readouterr().err
+    passing = json.dumps(
+        '```json\n{"summary":"s","passed":true,"report":"r","verdict":"approve","notes":"n"}\n```'
+    )
+    monkeypatch.setenv("FAKE_RESULT", passing)
+    rc = run_cli(
+        "run", repo, "--resume", "t1", "--max-iterations", "2", "--engine", "fake", "--runner", FAKE
+    )
+    assert rc == 0, capsys.readouterr()
+    snap = json.loads((tmp / "state" / "tasks" / "t1.json").read_text())
+    assert snap["status"] == "done" and snap["iteration"] == 2 and snap["max_iterations"] == 2
+    assert _names(tmp).count("graph-t1-coder-2") == 1
+
+
+def test_a_request_starting_with_a_dash_works_after_a_double_dash(env):
+    tmp, repo = env
+    rc = run_cli(
+        "run", "--engine", "fake", "--runner", FAKE, "--task-id", "t7", "--", repo, "-weird", "req"
+    )
+    assert rc == 0
+    snap = json.loads((tmp / "state" / "tasks" / "t7.json").read_text())
+    assert snap["request"] == "-weird req"
+
+
+def test_resume_after_an_architect_failure_reruns_only_the_architect(env, capsys, monkeypatch):
+    tmp, repo = env
+    monkeypatch.setenv("FAKE_FAIL_ROLE", "architect")
+    assert run_cli("run", repo, "x", "--task-id", "t1", "--engine", "fake", "--runner", FAKE) == 1
+    capsys.readouterr()
+    monkeypatch.delenv("FAKE_FAIL_ROLE")
+    assert run_cli("run", repo, "--resume", "t1", "--engine", "fake", "--runner", FAKE) == 0
+    names = _names(tmp)
+    assert names.count("graph-t1-pm-1") == 1 and "graph-t1-pm-2" not in names
+    assert names[:4] == [
+        "graph-t1-pm-1",
+        "graph-t1-architect-1",
+        "graph-t1-architect-2",
+        "graph-t1-coder-1",
+    ]
+
+
+def test_resume_of_an_interrupted_run_can_raise_the_cap(env):
+    tmp, repo = env
+    argv = [sys.executable, "-m", "claude_graph.cli", "run", str(repo), "x", "--task-id", "tcap"]
+    argv += ["--max-iterations", "1", "--engine", "fake", "--runner", str(FAKE)]
+    proc = subprocess.Popen(
+        argv, env={**os.environ, "FAKE_SLEEP": "20"}, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+    )
+    try:
+        deadline = time.time() + 15
+        while not (tmp / "argv.headless").exists() and time.time() < deadline:
+            time.sleep(0.05)
+        proc.terminate()
+        proc.communicate(timeout=15)
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+    assert proc.returncode == 130
+    rc = run_cli(
+        "run",
+        repo,
+        "--resume",
+        "tcap",
+        "--max-iterations",
+        "4",
+        "--engine",
+        "fake",
+        "--runner",
+        FAKE,
+    )
+    assert rc == 0
+    snap = json.loads((tmp / "state" / "tasks" / "tcap.json").read_text())
+    assert snap["status"] == "done" and snap["max_iterations"] == 4
+
+
+@pytest.mark.parametrize("bad", ["0", "-1", "21", "x"])
+def test_max_iterations_outside_1_to_20_is_a_usage_error(capsys, bad):
+    with pytest.raises(SystemExit) as e:
+        parser().parse_args(["run", "x", "--max-iterations", bad])
+    assert e.value.code == 2 and "max-iterations" in capsys.readouterr().err

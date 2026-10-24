@@ -5,7 +5,8 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "claude-graph"
 version = "0.1.0"
-description = "LangGraph harness: architect → coder → qa → reviewer loops, each step a headless Claude Code session in a claude-box sandbox"
+description = "LangGraph harness: pm → architect → coder → qa → reviewer loops, each step a headless Claude Code session in a sandbox"
+readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
   "langgraph>=1.2,<2",

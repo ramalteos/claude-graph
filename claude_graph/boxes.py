@@ -1,7 +1,6 @@
-"""Launch one headless role box through `claude-box headless` and read back its result.
+"""Launch one headless role box through the sandbox runner and read back its result.
 
-The orchestrator never sees a container path or an engine flag: claude-box owns the
-worktree, the mounts and the engine; this module owns the subprocess and the log.
+The runner owns worktree, mounts and engine; this module owns the subprocess and the log.
 """
 
 from __future__ import annotations
@@ -16,6 +15,7 @@ from pathlib import Path
 from typing import Protocol
 
 TIMEOUT_EXIT = 124  # what `timeout(1)` reports; a stopped box is reported the same way
+START_FAILED_EXIT = 127  # what a shell reports for a command it could not run
 INTERRUPT_EXIT = 130  # the shell convention for SIGINT
 BOX_PREFIX = "claude-box-"  # the runner prepends this to every --name
 BRANCH_PREFIX = "claude-graph/"  # branches this harness cuts
@@ -77,8 +77,8 @@ class ClaudeBoxRunner:
         prompt_file = stem.with_suffix(".prompt.md")
         system_file = stem.with_suffix(".system.md")
         log = stem.with_suffix(".log")
-        prompt_file.write_text(prompt)
-        system_file.write_text(system_prompt)
+        prompt_file.write_text(prompt, encoding="utf-8")
+        system_file.write_text(system_prompt, encoding="utf-8")
         argv = [
             str(self.claude_box),
             "headless",
@@ -108,12 +108,11 @@ class ClaudeBoxRunner:
             "effort": effort,
             "started": _now(),
         }
-        meta.write_text(json.dumps(meta_body))
+        meta.write_text(json.dumps(meta_body), encoding="utf-8")
         started = time.monotonic()
         with log.open("wb") as out:
             try:
-                # stdin closed: `claude -p` reads a non-TTY stdin to EOF, and the engine's
-                # `-i` would otherwise hand it a pipe that never closes.
+                # stdin closed: `claude -p` reads a non-TTY stdin to EOF
                 exit_code = subprocess.run(
                     argv,
                     stdin=subprocess.DEVNULL,
@@ -127,12 +126,17 @@ class ClaudeBoxRunner:
                 # Killing the client does not stop the container on every engine.
                 self._stop(BOX_PREFIX + name)
                 exit_code = TIMEOUT_EXIT
+            except OSError as e:
+                # runner could not start: a failed step with the reason in its log
+                out.write(
+                    f"claude-graph: cannot start the runner {self.claude_box}: {e}\n".encode()
+                )
+                exit_code = START_FAILED_EXIT
             except KeyboardInterrupt:
-                # Apple `container` cannot forward SIGINT to the box; stop it ourselves and
-                # close the record, or the dashboard shows this box as running forever.
+                # Apple `container` cannot forward SIGINT: stop the box and close its record
                 self._stop(BOX_PREFIX + name)
                 meta_body.update(finished=_now(), exit_code=INTERRUPT_EXIT, interrupted=True)
-                meta.write_text(json.dumps(meta_body))
+                meta.write_text(json.dumps(meta_body), encoding="utf-8")
                 raise
         result = read_log(log, exit_code=exit_code, duration_s=time.monotonic() - started)
         meta_body.update(
@@ -142,31 +146,51 @@ class ClaudeBoxRunner:
             cost_usd=result.cost_usd,
             is_error=result.is_error,
         )
-        meta.write_text(json.dumps(meta_body))
+        meta.write_text(json.dumps(meta_body), encoding="utf-8")
         return result
 
     def remove_worktree(self, *, task_id: str, repo: Path) -> None:
-        subprocess.run(
+        proc = subprocess.run(
             [str(self.claude_box), "headless", str(repo), "--worktree", task_id, "--remove"],
             env=self._env(),
-            check=True,
+            check=False,
             capture_output=True,
+            text=True,
         )
+        if proc.returncode != 0:
+            raise RuntimeError(
+                f"worktree removal failed: {(proc.stderr or proc.stdout).strip()[-500:]}"
+            )
 
     def _env(self) -> dict[str, str]:
         return {**os.environ, "CLAUDE_BOX_ENGINE": self.engine}
 
     def _stop(self, box: str) -> None:
-        subprocess.run(
-            [str(self.claude_box), "stop", box],
-            env=self._env(),
-            check=False,
-            capture_output=True,
-        )
+        """Best effort: runs inside the timeout and Ctrl-C paths, which must not raise."""
+        try:
+            subprocess.run(
+                [str(self.claude_box), "stop", box],
+                env=self._env(),
+                check=False,
+                capture_output=True,
+                timeout=120,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            pass
 
 
 def _now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
+
+
+def split_lines(text: str) -> list[str]:
+    """Split on "\n" only: `str.splitlines` also breaks on U+2028/U+2029, which JSON leaves
+    raw inside strings.
+    """
+    lines = text.split("\n")
+    if lines and lines[-1] == "":
+        lines.pop()
+    return [ln[:-1] if ln.endswith("\r") else ln for ln in lines]
 
 
 def read_log(log: Path, *, exit_code: int, duration_s: float) -> BoxResult:
@@ -175,7 +199,7 @@ def read_log(log: Path, *, exit_code: int, duration_s: float) -> BoxResult:
     result_text: str | None = None
     is_error = False
     cost: float | None = None
-    for line in log.read_text(errors="replace").splitlines():
+    for line in split_lines(log.read_text(encoding="utf-8", errors="replace")):
         if line.startswith("{"):
             try:
                 event = json.loads(line)

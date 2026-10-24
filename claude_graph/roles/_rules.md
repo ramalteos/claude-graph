@@ -19,4 +19,5 @@ report.
   report what remains.
 - Your final message ends with exactly one fenced ```json block in your role's schema, and
   nothing after it. The orchestrator reads only that block. A missing or malformed block is
-  read as the worst case for your role (QA: fail; reviewer: changes requested).
+  read as the worst case for your role (QA: fail; reviewer: changes requested). The block
+  must be valid JSON: inside its strings write newlines as `\n` and quotes as `\"`.

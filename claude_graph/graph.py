@@ -1,8 +1,7 @@
-"""The graph: architect → coder → qa → reviewer, with bounded loops back on failure."""
+"""The graph: pm → architect → coder → qa → reviewer, with bounded loops back on failure."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +9,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
 from claude_graph.boxes import BoxResult, BoxRunner
+from claude_graph.config import Settings
 from claude_graph.reports import (
     ArchitectReport,
     CoderReport,
@@ -20,28 +20,6 @@ from claude_graph.reports import (
 )
 from claude_graph.roles import system_prompt, user_prompt
 from claude_graph.state import StepRecord, TaskState
-
-# Judgement-heavy roles get the most capable model; the hands get opus.
-DEFAULT_MODELS = {
-    "pm": "fable",
-    "architect": "fable",
-    "coder": "opus",
-    "qa": "opus",
-    "reviewer": "opus",
-}
-DEFAULT_EFFORT = "high"
-
-
-@dataclass(frozen=True)
-class Settings:
-    models: dict[str, str] = field(default_factory=dict)
-    efforts: dict[str, str] = field(default_factory=dict)
-
-    def model(self, role: str) -> str:
-        return self.models.get(role, DEFAULT_MODELS[role])
-
-    def effort(self, role: str) -> str:
-        return self.efforts.get(role, DEFAULT_EFFORT)
 
 
 def build_graph(
@@ -57,7 +35,7 @@ def build_graph(
     g.add_edge(START, "pm")
     g.add_conditional_edges("pm", after_pm, {"architect": "architect", END: END})
     g.add_conditional_edges("architect", after_architect, {"coder": "coder", END: END})
-    g.add_edge("coder", "qa")
+    g.add_conditional_edges("coder", after_coder, {"qa": "qa", END: END})
     g.add_conditional_edges("qa", after_qa, {"reviewer": "reviewer", "coder": "coder", END: END})
     g.add_conditional_edges(
         "reviewer", after_reviewer, {"coder": "coder", "architect": "architect", END: END}
@@ -74,6 +52,10 @@ def after_pm(state: TaskState) -> str:
 
 def after_architect(state: TaskState) -> str:
     return END if state["status"] == "failed" else "coder"
+
+
+def after_coder(state: TaskState) -> str:
+    return END if state["status"] == "failed" else "qa"
 
 
 def after_qa(state: TaskState) -> str:
@@ -171,19 +153,22 @@ class _Nodes:
         report = parse_report(res.result_text, CoderReport)
         update = self._update(state, "coder", attempt, res, report is not None)
         update["iteration"] = state["iteration"]
-        if report:
-            update["coder_summary"] = report.summary
-        elif _box_failed(res):
+        if _box_failed(res):
+            # QA against a tree the coder never finished burns an iteration for nothing.
+            update["status"] = "failed"
             update["coder_summary"] = (
                 f"coder box failed (exit {res.exit_code}); see its log. " + _tail(res.result_text)
             )
+        elif report:
+            update["coder_summary"] = report.summary
         else:
             update["coder_summary"] = _tail(res.result_text)
         return update
 
     def qa(self, state: TaskState) -> TaskState:
         res, attempt = self._run("qa", state)
-        report = parse_report(res.result_text, QaReport)
+        # A verdict from a box that failed (stopped, timed out) is no verdict.
+        report = None if _box_failed(res) else parse_report(res.result_text, QaReport)
         update = self._update(state, "qa", attempt, res, report is not None)
         if report:
             update["qa_passed"], update["qa_report"] = report.passed, report.report
@@ -199,7 +184,7 @@ class _Nodes:
 
     def reviewer(self, state: TaskState) -> TaskState:
         res, attempt = self._run("reviewer", state)
-        report = parse_report(res.result_text, ReviewReport)
+        report = None if _box_failed(res) else parse_report(res.result_text, ReviewReport)
         update = self._update(state, "reviewer", attempt, res, report is not None)
         if report:
             update["review_verdict"], update["review_notes"] = report.verdict, report.notes

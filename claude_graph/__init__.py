@@ -1,1 +1,1 @@
-"""claude-graph: a LangGraph harness over claude-box."""
+"""claude-graph: a LangGraph harness over the sandbox runner."""

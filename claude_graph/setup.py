@@ -10,8 +10,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from claude_graph.config import find_claude_box
-from claude_graph.ui.data import login_verdict
+from claude_graph import config
+from claude_graph.login import login_verdict
 
 IMAGE = "claude-box"
 Runner = Callable[..., subprocess.CompletedProcess]
@@ -62,10 +62,10 @@ def setup(
             "brew install --cask container   (asks for your password), "
             "then re-run claude-graph setup",
         )
-        runner = find_claude_box()
-        _runner_check(r, runner, home, env)
+        runner = config.find_claude_box()
+        _runner_check(r, runner, home, env, run)
         _link_self(r, home, env)
-        _login_check(r)
+        _login_check(r, runner)
         return r
     r.ok("Apple `container` CLI")
 
@@ -84,15 +84,15 @@ def setup(
             )
 
     # 3. the runner
-    runner = find_claude_box()
-    if not _runner_check(r, runner, home, env):
+    runner = config.find_claude_box()
+    if not _runner_check(r, runner, home, env, run):
         _link_self(r, home, env)
         _login_check(r)
         return r
 
     # 4. the image
     images = run(["container", "image", "list"], capture_output=True, text=True, env=env)
-    if IMAGE in images.stdout:
+    if _image_present(images.stdout or ""):
         r.ok(f"image {IMAGE}:latest present")
     elif skip_build:
         r.left(f"image {IMAGE}:latest", f"{runner} build")
@@ -118,35 +118,87 @@ def _link_self(r: Report, home: Path, env: dict[str, str]) -> None:
     if not exe.is_file():
         return
     link = home / ".local" / "bin" / "claude-graph"
-    if link.exists() or link.is_symlink():
-        r.ok(f"{link} present")
-    else:
-        link.parent.mkdir(parents=True, exist_ok=True)
-        link.symlink_to(exe)
-        r.fixed(f"{link} -> {exe}")
+    _link(r, link, exe)
     if str(link.parent) not in env.get("PATH", "").split(os.pathsep):
         r.left("~/.local/bin on PATH", 'add to ~/.zshrc:  export PATH="$HOME/.local/bin:$PATH"')
 
 
-def _runner_check(r: Report, runner: Path | None, home: Path, env: dict[str, str]) -> bool:
+def _link(r: Report, link: Path, target: Path) -> None:
+    """`link -> target`; re-point a dangling link, leave a live one or a real file alone."""
+    if link.is_symlink():
+        old = os.readlink(link)
+        old_path = Path(old) if Path(old).is_absolute() else link.parent / old  # relative links
+        if old_path.resolve() == target.resolve():
+            r.ok(f"{link} present")
+            return
+        if old_path.exists():  # another live clone owns it; two clones must not flip it
+            r.left(
+                f"{link} points at {old}, not at this clone",
+                f"ln -sfn {target} {link}   (only if this clone should win)",
+            )
+            return
+        link.unlink()
+        link.symlink_to(target)
+        r.fixed(f"{link} -> {target}   (was {old}, dangling)")
+        return
+    if link.exists():
+        r.left(
+            f"{link} is a regular file, not a link",
+            f"move {link} out of the way (or delete it), then re-run claude-graph setup",
+        )
+        return
+    link.parent.mkdir(parents=True, exist_ok=True)
+    link.symlink_to(target)
+    r.fixed(f"{link} -> {target}")
+
+
+def _image_present(listing: str) -> bool:
+    """`container image list` rows are `NAME TAG DIGEST`; match the name, not a substring."""
+    for line in listing.splitlines():
+        parts = line.split()
+        if parts[:2] == [IMAGE, "latest"] or (parts and parts[0] == f"{IMAGE}:latest"):
+            return True
+    return False
+
+
+def _runner_check(
+    r: Report, runner: Path | None, home: Path, env: dict[str, str], run: Runner
+) -> bool:
     if not runner:
         r.left(
             "sandbox runner (abox)",
             "git submodule update --init   (or clone the sandbox repo next to this one)",
         )
         return False
+    repo = runner.resolve().parent  # a `~/.local/bin/claude-box` link points into the repo
+    # probe under the fake engine: needs no `container` CLI; an old runner has no `headless`
+    try:
+        probe = run(
+            [str(runner), "help"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            env={**env, "CLAUDE_BOX_ENGINE": "fake"},
+        )
+    except (OSError, subprocess.TimeoutExpired) as e:
+        r.left(
+            f"sandbox runner {runner} cannot be run ({getattr(e, 'strerror', None) or e})",
+            f"chmod +x {runner}   (or pass --runner <path to a working abox>)",
+        )
+        return False
+    if "headless" not in (probe.stdout or "") + (probe.stderr or ""):
+        r.left(
+            f"sandbox runner {runner} is too old (no `headless` command)",
+            f"git -C {repo} pull   (the runner needs the headless seam), "
+            "or pass --runner <path to a current abox>",
+        )
+        return False
     r.ok(f"sandbox runner {runner}")
-    abox = runner.parent / "abox"
+    abox = repo / "abox"
     if not abox.is_file():
-        r.left("abox wrapper", f"the sandbox repo at {runner.parent} has no `abox`; pull it")
+        r.left("abox wrapper", f"the sandbox repo at {repo} has no `abox`; pull it")
         return True
-    link = home / ".local" / "bin" / "abox"
-    if link.exists() or link.is_symlink():
-        r.ok(f"{link} present")
-    else:
-        link.parent.mkdir(parents=True, exist_ok=True)
-        link.symlink_to(abox)
-        r.fixed(f"{link} -> {abox}")
+    _link(r, home / ".local" / "bin" / "abox", abox)
     return True
 
 
@@ -155,6 +207,8 @@ def _login_check(r: Report, runner: Path | None = None) -> None:
     if verdict in ("ok", "api-key", "no-expiry"):
         r.ok(f"sandbox login ({verdict})")
         return
-    abox = "abox" if runner is None or runner.name == "abox" else str(runner.parent / "abox")
-    cmd = f"{abox} ~/Documents/GitHub/claude-graph"
+    abox = (
+        "abox" if runner is None or runner.name == "abox" else str(runner.resolve().parent / "abox")
+    )
+    cmd = f"{abox} {config._PACKAGE_ROOT}"  # any repo works; this clone is always there
     r.left(f"sandbox login ({verdict})", f"{cmd}   then type /login, finish in the browser, /exit")

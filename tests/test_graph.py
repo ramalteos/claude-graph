@@ -206,19 +206,6 @@ def test_reviewer_box_crash_is_changes_requested():
     assert final["status"] == "done"
 
 
-def test_coder_crash_still_goes_to_qa():
-    final, runner = run(
-        {
-            "architect": [PLAN],
-            "coder": [result(None, exit_code=1), CODED],
-            "qa": [QA_FAIL, QA_PASS],
-            "reviewer": [APPROVE],
-        }
-    )
-    assert runner.roles()[:4] == ["pm", "architect", "coder", "qa"]
-    assert final["status"] == "done"
-
-
 def test_checkpointed_run_resumes_as_a_no_op_when_finished():
     runner = FakeRunner(
         {
@@ -275,3 +262,39 @@ def test_pm_without_a_report_keeps_its_text_as_the_spec():
     assert final["spec"] == "prose spec"
     assert final["acceptance_criteria"] == []
     assert final["status"] == "done"
+
+
+def test_a_failed_qa_box_cannot_pass_even_with_a_valid_block():
+    broken_pass = result(report({"passed": True, "report": "green"}), exit_code=124)
+    final, runner = run(
+        {
+            "architect": [PLAN],
+            "coder": [CODED, CODED],
+            "qa": [broken_pass, QA_PASS],
+            "reviewer": [APPROVE],
+        }
+    )
+    assert final["status"] == "done"
+    assert runner.roles() == ["pm", "architect", "coder", "qa", "coder", "qa", "reviewer"]
+
+
+def test_a_failed_reviewer_box_asks_for_changes_even_with_an_approve_block():
+    broken_approve = result(report({"verdict": "approve", "notes": "lgtm"}), exit_code=1)
+    final, runner = run(
+        {
+            "architect": [PLAN],
+            "coder": [CODED, CODED],
+            "qa": [QA_PASS, QA_PASS],
+            "reviewer": [broken_approve, APPROVE],
+        }
+    )
+    assert final["status"] == "done"
+    assert runner.roles().count("reviewer") == 2
+
+
+def test_a_failed_coder_box_fails_the_task_instead_of_running_qa():
+    crashed = result(None, exit_code=127)
+    final, runner = run({"architect": [PLAN], "coder": [crashed]})
+    assert final["status"] == "failed"
+    assert runner.roles() == ["pm", "architect", "coder"]
+    assert "exit 127" in final["coder_summary"]

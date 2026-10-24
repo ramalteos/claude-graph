@@ -5,13 +5,16 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import signal
 import sys
+import threading
 import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from langgraph.checkpoint.sqlite import SqliteSaver
+from langgraph.graph import START
 
 from claude_graph.boxes import ClaudeBoxRunner
 from claude_graph.config import DEFAULT_ENGINE, find_claude_box, load_settings, state_dir
@@ -33,21 +36,30 @@ class CliError(Exception):
     pass
 
 
+ENGINES = ("container", "docker", "fake", "auto")  # what the runner's CLAUDE_BOX_ENGINE accepts
+
+
 def parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="claude-graph")
     sub = p.add_subparsers(required=True)
 
-    run = sub.add_parser("run", help="run a request through architect → coder → qa → reviewer")
+    run = sub.add_parser("run", help="run a request through pm → architect → coder → qa → reviewer")
     run.add_argument(
         "words",
         nargs="*",
         metavar="[repo] request",
-        help="the repo (default: the current directory) and what you want; omit with --resume",
+        help="the repo (a git checkout; default: the current directory) and what you want; "
+        "omit with --resume",
     )
     run.add_argument("--task-id", help="[A-Za-z0-9._-]{1,40}; default: a timestamp")
     run.add_argument("--resume", metavar="TASK_ID", help="continue a task from its last checkpoint")
-    run.add_argument("--max-iterations", type=int, default=DEFAULT_MAX_ITERATIONS)
-    run.add_argument("--engine", default=DEFAULT_ENGINE, help="container (default), docker, fake")
+    run.add_argument(
+        "--max-iterations",
+        type=_cap,
+        help=f"coder runs before giving up, 1-20 (default {DEFAULT_MAX_ITERATIONS}); "
+        "with --resume, a new, higher cap for an exhausted task",
+    )
+    run.add_argument("--engine", default=DEFAULT_ENGINE, choices=ENGINES, help="default: container")
     run.add_argument(
         "--runner",
         type=Path,
@@ -62,7 +74,7 @@ def parser() -> argparse.ArgumentParser:
 
     ui = sub.add_parser("ui", help="dashboard on localhost: tasks, steps, live box logs")
     ui.add_argument("--port", type=int, default=8765)
-    ui.add_argument("--engine", default=DEFAULT_ENGINE)
+    ui.add_argument("--engine", default=DEFAULT_ENGINE, choices=ENGINES)
     ui.add_argument("--runner", type=Path)
     ui.add_argument(
         "--actions",
@@ -82,10 +94,30 @@ def parser() -> argparse.ArgumentParser:
     return p
 
 
+def _cap(text: str) -> int:
+    """`--max-iterations`: 1 to 20, the same bounds the dashboard enforces."""
+    try:
+        value = int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"not a number: {text!r}") from None
+    if not 1 <= value <= 20:
+        raise argparse.ArgumentTypeError("must be between 1 and 20")
+    return value
+
+
 def _split_target(words: list[str]) -> tuple[Path, str]:
-    """`run <repo> <request…>` or `run <request…>` from inside the repo, like the sandbox CLI."""
-    if words and Path(words[0]).is_dir():
-        return Path(words[0]).resolve(), " ".join(words[1:])
+    """`run <repo> <request…>` or `run <request…>` from inside the repo.
+
+    The first word is the repo only if it is a git checkout or a path (`./x`, `/x`) to a dir.
+    """
+    if words:
+        try:
+            first = Path(words[0]).expanduser()
+        except RuntimeError:  # `~nosuchuser…`: prose, not a path
+            first = None
+        spelled_as_path = "/" in words[0] or words[0].startswith((".", "~"))
+        if first and ((first / ".git").exists() or (spelled_as_path and first.is_dir())):
+            return first.resolve(), " ".join(words[1:])
     return Path.cwd().resolve(), " ".join(words)
 
 
@@ -96,6 +128,8 @@ def cmd_run(args: argparse.Namespace) -> int:
     claude_box = args.runner or find_claude_box()
     if claude_box is None or not claude_box.is_file():
         raise CliError("runner not found; put abox on PATH or pass --runner <path>")
+    if not os.access(claude_box, os.X_OK):
+        raise CliError(f"runner is not executable: {claude_box}   (chmod +x it)")
     task_id = args.resume or args.task_id or time.strftime("t%Y%m%d-%H%M%S")
     if not TASK_ID.match(task_id):
         raise CliError(f"task id must match {TASK_ID.pattern}: {task_id!r}")
@@ -117,19 +151,21 @@ def cmd_run(args: argparse.Namespace) -> int:
             snapshot = graph.get_state(config)
             if not snapshot.values:
                 raise CliError(f"no such task: {task_id}")
-            if not snapshot.next:
-                final = snapshot.values
-                print(summary(final))
-                return 0 if final["status"] == "done" else 1
-            print(f"resuming {task_id} at {', '.join(snapshot.next)}", file=sys.stderr)
-            try:
-                final = _drive(graph, None, config, root)
-            except KeyboardInterrupt:
-                print(
-                    f"\ninterrupted; continue later with: claude-graph run --resume {task_id}",
-                    file=sys.stderr,
+            if snapshot.values["status"] == "done":
+                print(summary(snapshot.values))
+                return 0
+            if not snapshot.next:  # failed or exhausted: the graph ended, put it back on
+                _reopen(graph, config, snapshot.values, args.max_iterations)
+            elif args.max_iterations:
+                graph.update_state(
+                    config,
+                    {"max_iterations": args.max_iterations},
+                    as_node=_last_node(snapshot.values),
                 )
-                return 130
+            print(
+                f"resuming {task_id} at {', '.join(graph.get_state(config).next)}", file=sys.stderr
+            )
+            state = None
         else:
             if graph.get_state(config).values:
                 raise CliError(f"task {task_id} already exists; --resume it or pick another id")
@@ -137,19 +173,43 @@ def cmd_run(args: argparse.Namespace) -> int:
                 task_id=task_id,
                 request=request,
                 repo=str(repo),
-                max_iterations=args.max_iterations,
+                max_iterations=args.max_iterations or DEFAULT_MAX_ITERATIONS,
             )
             print(f"task {task_id} on {repo} (engine {args.engine})", file=sys.stderr)
-            try:
-                final = _drive(graph, state, config, root)
-            except KeyboardInterrupt:
-                print(
-                    f"\ninterrupted; continue later with: claude-graph run --resume {task_id}",
-                    file=sys.stderr,
-                )
-                return 130
+        try:
+            final = _drive(graph, state, config, root)
+        except KeyboardInterrupt:
+            _say(f"\ninterrupted; continue later with: claude-graph run --resume {task_id}")
+            return 130
     print(summary(final))
     return 0 if final["status"] == "done" else 1
+
+
+def _last_node(values: TaskState) -> str:
+    """Node whose edge leads to what runs next: the last finished step's role, or START."""
+    steps = values.get("steps", [])
+    return steps[-1]["role"] if steps else START
+
+
+def _reopen(graph: Any, config: dict, values: TaskState, new_cap: int | None) -> None:
+    """Put a failed/exhausted task back on the graph: failed replays from the node before the
+    failed one; exhausted takes a higher cap and re-routes from the exhausting node.
+    """
+    steps = values.get("steps", [])
+    update: dict[str, Any] = {"status": "running"}
+    if values["status"] == "exhausted":
+        cap = values["max_iterations"]
+        if not new_cap or new_cap <= cap:
+            raise CliError(
+                f"task exhausted its {cap} coder runs; resume with --max-iterations > {cap}"
+            )
+        update["max_iterations"] = new_cap
+        as_node = _last_node(values)
+    else:
+        as_node = steps[-2]["role"] if len(steps) >= 2 else START
+        if new_cap:
+            update["max_iterations"] = new_cap
+    graph.update_state(config, update, as_node=as_node)
 
 
 def _drive(graph: Any, state: TaskState | None, config: dict, root: Path) -> TaskState:
@@ -158,16 +218,50 @@ def _drive(graph: Any, state: TaskState | None, config: dict, root: Path) -> Tas
     task_id = (state or graph.get_state(config).values)["task_id"]
     pid_file = root / "tasks" / f"{task_id}.pid"
     pid_file.parent.mkdir(parents=True, exist_ok=True)
-    pid_file.write_text(str(os.getpid()))  # the dashboard's "is the orchestrator alive" check
+    pid_file.write_text(str(os.getpid()), encoding="utf-8")  # the dashboard's liveness check
+    # an interrupt outside the box wait is safe: snapshots atomic, checkpoints transactional
+    previous = _interrupt_on_signals()
     try:
-        if state:
-            _write_snapshot(root, state)
+        # first snapshot: the task shows as running at once
+        _write_snapshot(root, state or graph.get_state(config).values)
         for values in graph.stream(state, config, stream_mode="values"):
             final = values
             _write_snapshot(root, values)
     finally:
         pid_file.unlink(missing_ok=True)
+        _restore_signals(previous)
     return final
+
+
+def _interrupt_on_signals() -> dict[int, Any]:
+    """SIGTERM and SIGHUP take the Ctrl-C path, so the box is stopped and its record closed.
+    A SIGHUP already ignored (nohup) stays ignored. Returns what `_restore_signals` needs.
+    """
+    if threading.current_thread() is not threading.main_thread():
+        return {}
+
+    def interrupt(signum: int, frame: object) -> None:
+        raise KeyboardInterrupt
+
+    previous = {}
+    for signum in (signal.SIGTERM, signal.SIGHUP):
+        if signal.getsignal(signum) is signal.SIG_IGN:
+            continue
+        previous[signum] = signal.signal(signum, interrupt)
+    return previous
+
+
+def _restore_signals(previous: dict[int, Any]) -> None:
+    for signum, handler in previous.items():
+        if handler is not None:  # None: installed outside Python; nothing to put back
+            signal.signal(signum, handler)
+
+
+def _say(text: str) -> None:
+    try:
+        print(text, file=sys.stderr)
+    except OSError:  # the terminal that sent SIGHUP is gone
+        pass
 
 
 def cmd_ui(args: argparse.Namespace) -> int:
@@ -203,7 +297,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     path = state_dir() / "tasks" / f"{args.task_id}.json"
     if not path.is_file():
         raise CliError(f"no finished task {args.task_id} (still running? see `logs`)")
-    print(summary(json.loads(path.read_text())))
+    print(summary(json.loads(path.read_text(encoding="utf-8"))))
     return 0
 
 
@@ -216,7 +310,7 @@ def cmd_logs(args: argparse.Namespace) -> int:
         logs = [p for p in logs if p.stem.endswith(f"-{args.role}")]
         if not logs:
             raise CliError(f"no {args.role} log for task {args.task_id}")
-        sys.stdout.write(logs[-1].read_text(errors="replace"))
+        sys.stdout.write(logs[-1].read_text(encoding="utf-8", errors="replace"))
         return 0
     for p in logs:
         print(p)
@@ -254,5 +348,9 @@ def _write_snapshot(root: Path, state: TaskState) -> None:
     tasks.mkdir(parents=True, exist_ok=True)
     body = {**state, "updated_at": datetime.now(UTC).isoformat(timespec="seconds")}
     tmp = tasks / f".{state['task_id']}.json.tmp"
-    tmp.write_text(json.dumps(body, indent=2, default=str))
+    tmp.write_text(json.dumps(body, indent=2, default=str), encoding="utf-8")
     tmp.replace(tasks / f"{state['task_id']}.json")  # atomic: the UI never reads a half file
+
+
+if __name__ == "__main__":  # `python -m claude_graph.cli`: how the dashboard spawns a run
+    sys.exit(main())

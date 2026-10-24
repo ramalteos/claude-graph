@@ -9,41 +9,39 @@ import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import NamedTuple
 
-from claude_graph.graph import DEFAULT_EFFORT, DEFAULT_MODELS
+from claude_graph.config import DEFAULT_EFFORT, DEFAULT_MODELS
+from claude_graph.login import login_verdict
 from claude_graph.roles import ROLE_NAMES
 
 API_VERSION = 1
 STALL_AFTER_S = 1200  # a box silent this long is worth a look
 
 
-def credentials_path() -> Path:
-    env = os.environ.get("CLAUDE_BOX_CONFIG_HOME")
-    base = Path(env) if env else Path.home() / "Library" / "Application Support" / "claude-box"
-    return base / ".credentials.json"
+class Loaded(NamedTuple):
+    """One task's files, read once per request: snapshot, box records, live orchestrator pid."""
+
+    snap: dict | None
+    metas: list[dict]
+    pid: int | None
 
 
-def login_verdict(path: Path | None = None) -> str:
-    """ok | missing | expired | refresh-expired | unreadable — same rules as claude-box."""
-    path = path or credentials_path()
-    if os.environ.get("ANTHROPIC_API_KEY"):
-        return "api-key"
-    if not path.is_file():
-        return "missing"
+def _is_orchestrator(pid: int) -> bool:
+    """A pid file outlives a SIGKILLed orchestrator and pids get reused: only a process whose
+    command line names this package counts. Unanswerable (no /proc, no ps) → trusted.
+    """
     try:
-        oauth = (json.loads(path.read_text()) or {}).get("claudeAiOauth") or {}
-    except (OSError, json.JSONDecodeError):
-        return "unreadable"
-    if not oauth:
-        return "ok"
-    now = time.time()
-    refresh = oauth.get("refreshTokenExpiresAt")
-    if refresh and refresh / 1000 < now:
-        return "refresh-expired"
-    expires = oauth.get("expiresAt")
-    if expires is None:
-        return "no-expiry"
-    return "expired" if expires / 1000 < now else "ok"
+        with open(f"/proc/{pid}/cmdline", "rb") as f:  # Linux
+            argv = f.read().replace(b"\0", b" ").decode(errors="replace")
+    except OSError:
+        try:  # macOS
+            argv = subprocess.run(
+                ["ps", "-o", "command=", "-p", str(pid)], capture_output=True, text=True, timeout=5
+            ).stdout
+        except (OSError, subprocess.TimeoutExpired):
+            return True
+    return "claude_graph" in argv or "claude-graph" in argv
 
 
 @dataclass
@@ -55,13 +53,17 @@ class Store:
     engine: str
     _cache: dict[str, tuple[float, object]] = field(default_factory=dict, repr=False)
 
+    @property
+    def runner_name(self) -> str:
+        return self.claude_box.name if self.claude_box else "abox"
+
     # --- raw files -----------------------------------------------------------------
     def snapshot(self, task_id: str) -> dict | None:
         path = self.state_dir / "tasks" / f"{task_id}.json"
         if not path.is_file():
             return None
         try:
-            return json.loads(path.read_text())
+            return json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             return None
 
@@ -69,7 +71,7 @@ class Store:
         out = []
         for p in sorted((self.state_dir / "logs" / task_id).glob("*.meta.json")):
             try:
-                out.append(json.loads(p.read_text()))
+                out.append(json.loads(p.read_text(encoding="utf-8")))
             except (OSError, json.JSONDecodeError):
                 continue
         return out
@@ -84,7 +86,7 @@ class Store:
     def pid(self, task_id: str) -> int | None:
         path = self.state_dir / "tasks" / f"{task_id}.pid"
         try:
-            pid = int(path.read_text().strip())
+            pid = int(path.read_text(encoding="utf-8").strip())
         except (OSError, ValueError):
             return None
         try:
@@ -93,16 +95,18 @@ class Store:
             return None
         except PermissionError:
             pass
-        return pid
+        return pid if _is_orchestrator(pid) else None
+
+    def load(self) -> dict[str, Loaded]:
+        """Every task's files, read once; the views below take this so a poll reads each once."""
+        return {t: Loaded(self.snapshot(t), self.metas(t), self.pid(t)) for t in self.task_ids()}
 
     # --- assembled views -------------------------------------------------------------
-    def tasks(self) -> list[dict]:
+    def tasks(self, loaded: dict[str, Loaded] | None = None) -> list[dict]:
         out = []
-        for task_id in self.task_ids():
-            snap = self.snapshot(task_id) or {"task_id": task_id, "status": "starting", "steps": []}
-            metas = self.metas(task_id)
+        for task_id, (snap, metas, pid) in _loaded(self, loaded).items():
+            snap = snap or {"task_id": task_id, "status": "starting", "steps": []}
             running = next((m for m in metas if "finished" not in m), None)
-            pid = self.pid(task_id)
             status = snap.get("status", "starting")
             if status in ("running", "starting") and not pid:
                 status = "stopped"  # the orchestrator is gone; --resume continues the task
@@ -140,13 +144,13 @@ class Store:
             out, key=lambda t: t.get("updated_at") or t.get("started_at") or "", reverse=True
         )
 
-    def boxes(self) -> list[dict]:
+    def boxes(self, loaded: dict[str, Loaded] | None = None) -> list[dict]:
         """Boxes in flight: an open record whose orchestrator is still alive."""
         out = []
-        for task_id in self.task_ids():
-            if not self.pid(task_id):
+        for task_id, (_, metas, pid) in _loaded(self, loaded).items():
+            if not pid:
                 continue
-            for m in self.metas(task_id):
+            for m in metas:
                 if "finished" not in m:
                     out.append(_box_view(task_id, m))
         return sorted(out, key=lambda b: b.get("started") or "")
@@ -154,21 +158,20 @@ class Store:
     def engine_boxes(self) -> list[str]:
         return self._cached("ps", 3, self._ps)
 
-    def timeline(self, limit: int = 60) -> list[dict]:
+    def timeline(self, limit: int = 60, loaded: dict[str, Loaded] | None = None) -> list[dict]:
         events = []
-        for task_id in self.task_ids():
-            for m in self.metas(task_id):
+        for task_id, (_, metas, _pid) in _loaded(self, loaded).items():
+            for m in metas:
                 events.append({**_box_view(task_id, m), "finished": m.get("finished")})
         events.sort(key=lambda e: e.get("finished") or e.get("started") or "", reverse=True)
         return events[:limit]
 
-    def role_stats(self) -> list[dict]:
+    def role_stats(self, loaded: dict[str, Loaded] | None = None) -> list[dict]:
         acc: dict[str, dict] = {
             r: {"role": r, "runs": 0, "ok": 0, "secs": 0.0, "cost": 0.0} for r in ROLE_NAMES
         }
-        for task_id in self.task_ids():
-            snap = self.snapshot(task_id) or {}
-            for s in snap.get("steps", []):
+        for snap, _, _pid in _loaded(self, loaded).values():
+            for s in (snap or {}).get("steps", []):
                 a = acc.setdefault(
                     s["role"], {"role": s["role"], "runs": 0, "ok": 0, "secs": 0.0, "cost": 0.0}
                 )
@@ -208,7 +211,8 @@ class Store:
             items.append(
                 {
                     "kind": "login",
-                    "text": f"claude-box login is {verdict}: run `abox <repo>` and /login",
+                    "text": f"sandbox login is {verdict}: "
+                    f"run `{self.runner_name} <repo>` and /login",
                 }
             )
         for t in tasks:
@@ -273,7 +277,8 @@ class Store:
         return {k: snap.get(k) for k in keys}
 
     def state(self) -> dict:
-        tasks = self.tasks()
+        loaded = self.load()
+        tasks = self.tasks(loaded)
         return {
             "api_version": API_VERSION,
             "now": datetime.now(UTC).isoformat(timespec="seconds"),
@@ -282,10 +287,10 @@ class Store:
             "login": login_verdict(),
             "state_dir": str(self.state_dir),
             "tasks": tasks,
-            "boxes": self.boxes(),
+            "boxes": self.boxes(loaded),
             "attention": self.attention(tasks),
-            "timeline": self.timeline(),
-            "role_stats": self.role_stats(),
+            "timeline": self.timeline(loaded=loaded),
+            "role_stats": self.role_stats(loaded),
             "spend": self.spend(tasks),
             "logs": self.logs(),
             "config": {
@@ -316,7 +321,11 @@ class Store:
             )
             return [ln for ln in proc.stdout.splitlines() if ln.strip()]
         except (OSError, subprocess.TimeoutExpired) as e:
-            return [f"claude-box ps failed: {e}"]
+            return [f"{self.runner_name} ps failed: {e}"]
+
+
+def _loaded(store: Store, loaded: dict[str, Loaded] | None) -> dict[str, Loaded]:
+    return loaded if loaded is not None else store.load()  # {} means "no tasks", not "reload"
 
 
 def _box_view(task_id: str, m: dict) -> dict:
@@ -381,11 +390,15 @@ def _git(repo: Path, args: list[str], limit: int) -> str:
 def _git_progress(repo: Path, base: str, branch: str) -> dict | None:
     if not repo.is_dir():
         return None
-    check = subprocess.run(
-        ["git", "-C", str(repo), "rev-parse", "--verify", "-q", branch],
-        capture_output=True,
-        text=True,
-    )
+    try:
+        check = subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", "--verify", "-q", branch],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
     if check.returncode != 0:
         return {"commits": 0, "shortstat": "", "branch_exists": False}
     commits = _git(repo, ["rev-list", "--count", f"{base}..{branch}"], 100).strip()

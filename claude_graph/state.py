@@ -9,7 +9,8 @@ from typing import Annotated, Literal, TypedDict
 Status = Literal["running", "done", "exhausted", "failed"]
 Verdict = Literal["approve", "changes", "redesign"]
 DEFAULT_MAX_ITERATIONS = 3
-TASK_ID = re.compile(r"^(?!\.+$)[A-Za-z0-9._-]{1,40}$")  # a path segment, never "." or ".."
+# git-valid branch suffix: no leading dot/dash, trailing dot, "..", ".lock"; \Z: no newline
+TASK_ID = re.compile(r"^(?![.-])(?!.*\.\.)(?!.*\.lock\Z)[A-Za-z0-9._-]{1,40}(?<!\.)\Z")
 
 
 class StepRecord(TypedDict):

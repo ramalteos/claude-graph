@@ -246,11 +246,11 @@ function render(s) {
 
   // roles
   setHTML("roles", `<table><thead><tr><th>role</th><th>model</th><th>runs</th><th>reports ok</th><th>avg</th><th>cost</th></tr></thead><tbody>${s.role_stats.map(r => `
-    <tr><td><span class="badge ${esc(r.role)}">${esc(r.role)}</span></td><td class="mono">${esc(s.config.models[r.role] || "")}</td><td>${r.runs}</td><td>${r.runs ? Math.round(100 * r.ok / r.runs) + "%" : ""}</td><td class="mono">${r.runs ? dur(r.avg_s) : ""}</td><td class="mono">${money(r.cost)}</td></tr>`).join("")}</tbody></table>`);
+    <tr><td><span class="badge ${esc(r.role)}">${esc(r.role)}</span></td><td class="mono">${esc(s.config.models[r.role] || "")}</td><td>${esc(r.runs)}</td><td>${r.runs ? Math.round(100 * r.ok / r.runs) + "%" : ""}</td><td class="mono">${r.runs ? dur(r.avg_s) : ""}</td><td class="mono">${money(r.cost)}</td></tr>`).join("")}</tbody></table>`);
 
   // engine
   $("enginecount").textContent = Math.max(0, s.engine_boxes.length - 1) || "";
-  setHTML("enginebox", s.engine_boxes.length ? `<pre style="margin:0;padding:10px 14px" class="mono">${esc(s.engine_boxes.join("\n"))}</pre>` : `<div class="empty">claude-box ps: nothing running</div>`);
+  setHTML("enginebox", s.engine_boxes.length ? `<pre style="margin:0;padding:10px 14px" class="mono">${esc(s.engine_boxes.join("\n"))}</pre>` : `<div class="empty">nothing running in the engine</div>`);
 
   // config
   setHTML("config", `<table><tbody>${Object.entries(s.config.models).map(([r, m]) => `<tr><td><span class="badge ${esc(r)}">${esc(r)}</span></td><td class="mono">${esc(m)} · effort ${esc(s.config.effort)}</td></tr>`).join("")}<tr><td>override</td><td class="dim">&lt;repo&gt;/claude-graph.toml → [models] / [efforts]</td></tr><tr><td>state</td><td class="mono dim">${esc(s.state_dir)}</td></tr></tbody></table>`);
@@ -265,13 +265,13 @@ function taskCard(t) {
   const strip = ROLES.map(r => `<span class="node ${r === run ? "run" : (t.status === "failed" && lastStep && lastStep.role === r) ? "bad" : done.has(r) ? "done" : ""}">${r}</span>`).join("");
   const p = t.progress;
   const chips = [
-    `<span class="chip">iter ${t.iteration}/${t.max_iterations ?? "?"}</span>`,
+    `<span class="chip">iter ${esc(t.iteration)}/${esc(t.max_iterations ?? "?")}</span>`,
     `<span class="chip">${money(t.cost)}</span>`,
     t.branch ? `<span class="chip mono">${esc(t.branch)}</span>` : "",
-    p && p.branch_exists ? `<span class="chip ${p.commits ? "ok" : ""}">+${p.commits} commit${p.commits === 1 ? "" : "s"}${p.shortstat ? " · " + esc(p.shortstat.replace(/ files? changed/, "f").replace(/ insertions?\(\+\)/, "+").replace(/ deletions?\(-\)/, "-")) : ""}</span>` : "",
+    p && p.branch_exists ? `<span class="chip ${p.commits ? "ok" : ""}">+${esc(p.commits)} commit${p.commits === 1 ? "" : "s"}${p.shortstat ? " · " + esc(p.shortstat.replace(/ files? changed/, "f").replace(/ insertions?\(\+\)/, "+").replace(/ deletions?\(-\)/, "-")) : ""}</span>` : "",
     t.qa_passed === false ? `<span class="chip bad">qa failed</span>` : t.qa_passed ? `<span class="chip ok">qa ok</span>` : "",
     t.review_verdict ? `<span class="chip ${t.review_verdict === "approve" ? "ok" : "warn"}">${esc(t.review_verdict)}</span>` : "",
-    t.pid ? `<span class="chip">pid ${t.pid}</span>` : "",
+    t.pid ? `<span class="chip">pid ${esc(t.pid)}</span>` : "",
   ].join("");
   const acts = [
     openBtn("task", t.task_id, "", "open"),
@@ -305,14 +305,18 @@ async function showLog(task, name) {
   await tailLog();
 }
 async function tailLog() {
-  if (drawer.kind !== "log" || !drawer.task) return;
+  if (drawer.kind !== "log" || !drawer.task || drawer.tailing) return;  // one fetch in flight
   const seq = drawer.seq, body = $("body");
   let r;
-  try { r = await (await fetch(`/api/log?task=${encodeURIComponent(drawer.task)}&name=${encodeURIComponent(drawer.name)}&offset=${drawer.offset}&raw=${drawer.raw ? 1 : 0}`)).json(); }
+  drawer.tailing = true;
+  const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 10000);
+  try { r = await (await fetch(`/api/log?task=${encodeURIComponent(drawer.task)}&name=${encodeURIComponent(drawer.name)}&offset=${drawer.offset}&raw=${drawer.raw ? 1 : 0}`, { signal: ctl.signal })).json(); }
   catch { if (seq === drawer.seq) body.textContent = "log unavailable"; return; }
-  if (seq !== drawer.seq) return;
+  finally { clearTimeout(timer); drawer.tailing = false; }
+  if (seq !== drawer.seq) { tailLog(); return; }  // drawer moved on: serve it now
   if (r.error) { body.textContent = r.error; return; }
-  drawer.offset = r.offset; drawer.lines.push(...r.lines);
+  if (r.reset) { drawer.lines = []; body.innerHTML = ""; }  // log rewritten shorter
+  drawer.offset = r.offset; for (const l of r.lines) drawer.lines.push(l);
   if (drawer.lines.length > 5000) drawer.lines.splice(0, drawer.lines.length - 5000);
   if (!r.lines.length && body.childNodes.length) return;
   const atBottom = $("follow").checked || body.scrollTop + body.clientHeight >= body.scrollHeight - 40;
@@ -329,7 +333,7 @@ async function showTask(task) {
   if (d.error) { body.textContent = d.error; return; }
   const sec = (title, text) => text ? `<h2>${esc(title)}</h2><pre>${esc(text)}</pre>` : "";
   body.innerHTML = `
-    <div class="chips"><span class="chip">${esc(d.status)}</span><span class="chip">iter ${d.iteration}/${d.max_iterations}</span>${d.branch ? `<span class="chip mono">${esc(d.branch)}</span>` : ""}${d.base_sha ? `<span class="chip mono">base ${esc(d.base_sha.slice(0, 10))}</span>` : ""}<span class="chip mono">${esc(d.repo || "")}</span></div>
+    <div class="chips"><span class="chip">${esc(d.status)}</span><span class="chip">iter ${esc(d.iteration)}/${esc(d.max_iterations)}</span>${d.branch ? `<span class="chip mono">${esc(d.branch)}</span>` : ""}${d.base_sha ? `<span class="chip mono">base ${esc(d.base_sha.slice(0, 10))}</span>` : ""}<span class="chip mono">${esc(d.repo || "")}</span></div>
     ${sec("Request", d.request)}
     ${sec("Spec (pm)", d.spec)}
     ${d.acceptance_criteria && d.acceptance_criteria.length ? `<h2>Acceptance criteria</h2><ol>${d.acceptance_criteria.map(c => `<li>${esc(c)}</li>`).join("")}</ol>` : ""}
@@ -354,12 +358,15 @@ function showNew() {
     <label>request<textarea name="request" required placeholder="add a /health endpoint that reports DB status"></textarea></label>
     <label>task id (optional, [A-Za-z0-9._-])<input name="task_id" pattern="[A-Za-z0-9._-]{1,40}"></label>
     <label>max coder iterations<input name="max_iterations" type="number" min="1" max="20" value="3"></label>
-    <div><button type="submit">start</button></div></form>`;
-  $("newform").onsubmit = (e) => {
+    <div><button type="submit">start</button> <span id="newerr" class="bad"></span></div></form>`;
+  $("newform").onsubmit = async (e) => {
     e.preventDefault();
     const f = new FormData(e.target);
     const spec = { repo: f.get("repo"), request: f.get("request"), task_id: f.get("task_id") || undefined, max_iterations: Number(f.get("max_iterations")) || undefined };
-    act("run", JSON.stringify(spec), true);
+    $("newerr").textContent = "starting…";
+    const out = await postAction("run", JSON.stringify(spec));
+    if (!out.ok) { $("newerr").textContent = out.output || "failed"; return; }
+    openDrawer("new task", "action"); $("body").textContent = "ok\n\n" + (out.output || ""); poll();
   };
 }
 
@@ -375,12 +382,15 @@ async function act(action, arg, skipConfirm) {
   }
   openDrawer(`${action} ${arg.length > 60 ? "" : arg}`, "action");
   const body = $("body"); body.textContent = "running…";
+  const out = await postAction(action, arg);
+  body.textContent = (out.ok ? "ok\n\n" : "failed\n\n") + (out.output || "");
+  poll();
+}
+async function postAction(action, arg) {
   try {
     const res = await fetch("/api/action", { method: "POST", headers: { "Content-Type": "application/json", "X-CG-Token": ACTION_TOKEN }, body: JSON.stringify({ action, arg }) });
-    const out = await res.json();
-    body.textContent = (out.ok ? "ok\n\n" : "failed\n\n") + (out.output || "");
-  } catch { body.textContent = "the request failed"; }
-  poll();
+    return await res.json();
+  } catch { return { ok: false, output: "the request failed" }; }
 }
 
 // --- wiring ---------------------------------------------------------------------------

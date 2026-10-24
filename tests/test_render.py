@@ -104,3 +104,18 @@ def test_progress_system_events_are_silent():
     assert render_event({"type": "system", "subtype": "init", "session_id": "s", "model": "m"}) == [
         "· session s · model m"
     ]
+
+
+def test_render_keeps_a_json_line_holding_a_unicode_line_separator():
+    from claude_graph.render import render_log
+
+    event = {"type": "result", "subtype": "success", "num_turns": 1, "result": "a\u2028b"}
+    lines = render_log(json.dumps(event, ensure_ascii=False) + "\n")
+    assert lines[0].startswith("■ success") and "".join(lines[1:]) == "ab"  # the event survived
+
+
+def test_render_survives_a_non_numeric_cost():
+    from claude_graph.render import render_event
+
+    lines = render_event({"type": "result", "subtype": "success", "total_cost_usd": "n/a"})
+    assert lines and lines[0].startswith("■ success")

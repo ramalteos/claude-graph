@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from claude_graph.boxes import BRANCH_PREFIX
 from claude_graph.state import TaskState
 
 ROLES_DIR = Path(__file__).parent / "roles"
@@ -13,9 +14,9 @@ ROLE_NAMES = ("pm", "architect", "coder", "qa", "reviewer")
 def system_prompt(role: str) -> str:
     """The role's persona, then the shared rules, then the code standards every role is held to."""
     _check(role)
-    persona = (ROLES_DIR / f"{role}.md").read_text()
-    rules = (ROLES_DIR / "_rules.md").read_text()
-    standards = (ROLES_DIR / "_standards.md").read_text()
+    persona = (ROLES_DIR / f"{role}.md").read_text(encoding="utf-8")
+    rules = (ROLES_DIR / "_rules.md").read_text(encoding="utf-8")
+    standards = (ROLES_DIR / "_standards.md").read_text(encoding="utf-8")
     return f"{persona}\n\n---\n\n{rules}\n\n---\n\n{standards}"
 
 
@@ -24,7 +25,7 @@ def user_prompt(role: str, state: TaskState) -> str:
     _check(role)
     parts = [
         f"# Task {state['task_id']}",
-        f"Branch: {state.get('branch') or 'claude-graph/' + state['task_id']}",
+        f"Branch: {state.get('branch') or BRANCH_PREFIX + state['task_id']}",
         f"Base commit: {state.get('base_sha') or '(the branch point; see git log)'}",
         f"Coder attempt {state.get('iteration', 0)} of {state['max_iterations']}",
         "",
