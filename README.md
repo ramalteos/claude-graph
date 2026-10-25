@@ -5,7 +5,8 @@ A LangGraph harness for coding tasks. One request goes through five role agents 
 comes out as a reviewed branch. The product manager writes the spec and acceptance
 criteria first; every later role works against them. Every agent is a headless Claude
 Code session running inside a sandbox, launched with Apple `container` by `abox`, the
-runner from the [sandbox repo](sandbox/) (a git submodule).
+runner from the [sandbox repo](https://github.com/raj-mehra/claude-box), vendored here as the
+`sandbox/` git submodule.
 
 ```
 START → pm → architect → coder → qa ──pass──→ reviewer ──approve──→ END  (done)
@@ -219,7 +220,7 @@ all at effort `high`. Values are Claude Code `--model` / `--effort` arguments.
    files, then runs `abox headless <repo> --worktree <task-id> --name graph-<task>-<role>-<n> …`.
    `abox` creates the worktree in-container on the first call and reuses it after.
 3. The box's stream-json goes to `<state>/logs/<task-id>/<nn>-<role>.log`. The final
-   `result` event's text is the role's answer; its last fenced ```json block is the report.
+   `result` event's text is the role's answer; its last fenced `json` block is the report.
 4. The node parses the report and updates state. Unparseable reports take the conservative
    value: QA → fail, reviewer → changes, architect → raw text as the plan.
 
@@ -230,8 +231,8 @@ Report contract:
 | pm | `{"spec": "…", "acceptance_criteria": ["…"]}` |
 | architect | `{"plan": "…"}` |
 | coder | `{"summary": "…"}` |
-| qa | `{"passed": true|false, "report": "…"}` |
-| reviewer | `{"verdict": "approve"|"changes"|"redesign", "notes": "…"}` |
+| qa | `{"passed": true \| false, "report": "…"}` |
+| reviewer | `{"verdict": "approve" \| "changes" \| "redesign", "notes": "…"}` |
 
 State lives in `~/Library/Application Support/claude-graph/` (override with
 `CLAUDE_GRAPH_STATE`): `checkpoints.sqlite` (LangGraph checkpoints, one thread per task),
@@ -258,8 +259,8 @@ without the submodule).
   the host's IP forwarding was switched off (a VPN client does this on connect and does
   not restore it). `abox` re-enables it and may ask for `sudo` once.
 - **`CLAUDE_BOX_ENGINE=container but the 'container' CLI is not on PATH`**: `brew install --cask container`.
-- **Image build fails with `corepack: not found`**: Vite+ 1.3 dropped its corepack shim;
-  the sandbox Dockerfile (2026-10-21) uses the pnpm shim instead. Pull the sandbox repo.
+- **Image build fails with `corepack: not found`**: an old sandbox Dockerfile; update the
+  submodule (`git submodule update --remote sandbox`) and build again.
 - **`runner not found`**: `git submodule update --init`, or pass `--runner <path to abox>`.
 - **A task's first box fails with an auth error**: log in once interactively (Setup, item 2).
 - **Stale box name already running**: `abox ps`, then `abox stop <box>`;
