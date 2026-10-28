@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from claude_graph.github import Checks, PublishError, PullRequest
+from claude_graph.github import BotReview, Checks, PublishError, PullRequest
 
 
 @dataclass
@@ -21,6 +21,8 @@ class FakeGitHub:
     rename_ok: bool = True
     labels: list[tuple[int, str]] = field(default_factory=list)
     fail_label: bool = False
+    bot: list[BotReview] = field(default_factory=list)  # answers, in order; empty = no bot
+    waited_since: list[str] = field(default_factory=list)
 
     def push(self, repo: Path, branch: str) -> None:
         self.calls.append("push")
@@ -60,3 +62,12 @@ class FakeGitHub:
         if self.fail_label:
             raise PublishError("label: HTTP 403")
         self.labels.append((number, risk))
+
+    def bot_present(self, repo: Path, number: int) -> bool:
+        self.calls.append("bot_present")
+        return bool(self.bot)
+
+    def wait_bot_review(self, repo: Path, number: int, since: str, timeout_s: int) -> BotReview:
+        self.calls.append("wait_bot_review")
+        self.waited_since.append(since)
+        return self.bot.pop(0)

@@ -46,6 +46,7 @@ class TaskState(TypedDict, total=False):
     pr_body: str
     risk: str  # low | medium | high: the coder's call, corrected by the reviewer
     ci_status: str  # pass | fail | none | timeout | error
+    bot_review: str  # what the review bot said after the last approval
     ci_summary: str
     spec: str
     acceptance_criteria: list[str]

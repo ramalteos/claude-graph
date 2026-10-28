@@ -134,3 +134,51 @@ def test_label_risk_creates_the_missing_labels_then_swaps_them(world, monkeypatc
     assert log[-1] == (
         "pr edit 7 --add-label risk:high --remove-label risk:low --remove-label risk:medium"
     )
+
+
+def test_wait_bot_review_reads_coderabbit_after_a_point_in_time(world, monkeypatch):
+    from claude_graph.github import BotReview
+
+    repo, _, _ = world
+    reviews = json.dumps(
+        [
+            {
+                "user": {"login": "ramalteos"},
+                "submitted_at": "2026-10-28T22:30:58Z",
+                "body": "approve",
+            },
+            {
+                "user": {"login": "coderabbitai[bot]"},
+                "submitted_at": "2026-10-28T22:43:50Z",
+                "body": "<!-- x -->\n\n**Actionable comments posted: 1**\n\n---",
+            },
+        ]
+    )
+    comments = json.dumps(
+        [
+            {
+                "user": {"login": "coderabbitai[bot]"},
+                "created_at": "2026-10-28T22:08:40Z",
+                "body": "Walkthrough",
+            },
+            {
+                "user": {"login": "coderabbitai[bot]"},
+                "created_at": "2026-10-28T22:50:00Z",
+                "body": "No actionable comments were generated in the recent review.",
+            },
+        ]
+    )
+    monkeypatch.setenv("FAKE_GH_REVIEWS", reviews)
+    monkeypatch.setenv("FAKE_GH_COMMENTS", comments)
+    gh = GhGitHub()
+    assert gh.bot_present(repo, 7) is True
+    assert gh.wait_bot_review(repo, 7, "2026-10-28T22:31:00Z", 0) == BotReview(
+        "actionable", "CodeRabbit posted 1 actionable comment(s) at 2026-10-28T22:43:50Z"
+    )
+    assert gh.wait_bot_review(repo, 7, "2026-10-28T22:45:00Z", 0).status == "clean"
+    assert gh.wait_bot_review(repo, 7, "2026-10-28T23:00:00Z", 0) == BotReview(
+        "none", "no CodeRabbit review within 0 s"
+    )
+    monkeypatch.setenv("FAKE_GH_COMMENTS", "[]")
+    monkeypatch.setenv("FAKE_GH_REVIEWS", "[]")
+    assert gh.bot_present(repo, 7) is False

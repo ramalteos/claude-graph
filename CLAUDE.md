@@ -21,8 +21,10 @@ submodule). The orchestrator is Python; the engine side is bash in the sandbox r
   until then), keeps one draft PR labelled `risk:<level>` from the coder's report (the
   reviewer may correct it; labels created on first use), waits for CI;
   the reviewer reviews that PR and, with `[slack] channel` set, announces its approval on
-  Slack from inside its box; on `approve` the host marks the PR ready. Nothing is ever
-  merged by the graph. `--no-publish` keeps a task local.
+  Slack from inside its box; on `approve` the host marks the PR ready, then waits for the
+  review bot (CodeRabbit reviews only a ready PR): actionable comments turn the approval
+  into `changes` and the coder runs again. Nothing is ever merged by the graph.
+  `--no-publish` keeps a task local.
 - **Boxes carry the host's enabled plugins** (`CLAUDE_BOX_SEED_PLUGINS=host` in the runner
   env, overridable); plugin OAuth tokens stay on the host.
 - Docs and commands say "sandbox" / "runner"; the engine-side project name stays in code

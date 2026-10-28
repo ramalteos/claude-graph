@@ -93,6 +93,12 @@ def parser() -> argparse.ArgumentParser:
     run.add_argument(
         "--ci-timeout", type=int, default=900, help="seconds to wait for the PR's checks"
     )
+    run.add_argument(
+        "--bot-timeout",
+        type=int,
+        default=900,
+        help="seconds to wait for the review bot (CodeRabbit) after an approval",
+    )
     run.set_defaults(func=cmd_run)
 
     status = sub.add_parser("status", help="final/last state of a task")
@@ -197,13 +203,11 @@ def cmd_run(args: argparse.Namespace) -> int:
             checkpointer=saver,
             github=GhGitHub() if publish else None,
             ci_timeout_s=args.ci_timeout,
+            bot_timeout_s=args.bot_timeout,
         )
         if args.resume:
             snapshot = graph.get_state(config)
             values = snapshot.values
-            if values["status"] == "done":
-                print(summary(values))
-                return 0
             # Turning publish on for a task that never had it: the branch needs its PR, so
             # resume at the publish step unless a coder run is the pending node anyway.
             turning_on = publish and not values.get("publish")
@@ -323,11 +327,24 @@ def _reopen(
     new_cap: int | None,
     extra: dict[str, Any] | None = None,
 ) -> None:
-    """Put a failed/exhausted task back on the graph: failed replays from the node before the
-    failed one; exhausted takes a higher cap and re-routes from the exhausting node."""
+    """Put a finished task back on the graph: failed replays from the node before the failed
+    one; exhausted takes a higher cap and re-routes from the exhausting node; done sends the
+    coder back to the pull request's review comments."""
     steps = values.get("steps", [])
     update: dict[str, Any] = {"status": "running", **(extra or {})}
-    if values["status"] == "exhausted":
+    if values["status"] == "done":
+        cap = values["max_iterations"]
+        if values.get("iteration", 0) >= cap and (not new_cap or new_cap <= cap):
+            raise CliError(f"task used its {cap} coder runs; resume with --max-iterations > {cap}")
+        if new_cap:
+            update["max_iterations"] = new_cap
+        update["review_verdict"] = "changes"
+        update["review_notes"] = (
+            "Resumed after completion: read every review comment on the pull request "
+            "(CodeRabbit and human), fix the valid ones, reply to the rest."
+        )
+        as_node = "reviewer"
+    elif values["status"] == "exhausted":
         cap = values["max_iterations"]
         if not new_cap or new_cap <= cap:
             raise CliError(
@@ -466,6 +483,7 @@ def summary(state: TaskState) -> str:
         f"  base:       {state.get('base_sha', '-')}",
         *([f"  pr:         {state['pr_url']}"] if state.get("pr_url") else []),
         *([f"  ci:         {state['ci_status']}"] if state.get("ci_status") else []),
+        *([f"  bot:        {state['bot_review']}"] if state.get("bot_review") else []),
         f"  iterations: {state.get('iteration', 0)}/{state.get('max_iterations', '?')}",
         f"  boxes:      {len(steps)}  (${cost:.2f})",
     ]

@@ -155,7 +155,9 @@ claude-graph logs health-route qa                     # the latest QA log
 SIGTERM or a hangup from a closed terminal (the box is stopped and its record closed;
 `--resume` continues from the last finished node). Under `nohup` a hangup stays ignored.
 `--resume` also reopens a finished task: a `failed` one runs the role that failed again; an
-`exhausted` one needs `--max-iterations` above its old cap and continues the loop. A task
+`exhausted` one needs `--max-iterations` above its old cap and continues the loop; a `done`
+one sends the coder back to the pull request's review comments (CodeRabbit or human), then
+QA and the reviewer run again. A task
 started before the pull-request flow existed gets it on resume (`--no-publish` to keep it
 local); `--resume … --publish` turns it on for a task started with `--no-publish`. Either
 way the resumed task goes through the publish step before QA runs again.
@@ -166,7 +168,11 @@ The deliverable is the pull request from the pm-named branch, a draft until the 
 approves, with the reviewer's findings as a review comment and CI run on it. It carries a
 `risk:low`, `risk:medium` or `risk:high` label: the lead developer's rating by the worst
 thing the change touches, corrected by the reviewer when wrong; the three labels are
-created in the repo on first use. The coder
+created in the repo on first use. CodeRabbit reviews a PR only once it is ready, so after
+the reviewer's approval the host marks the PR ready and waits up to `--bot-timeout`
+seconds (default 900) for CodeRabbit's verdict: actionable comments send the task back
+to the coder, who fixes or answers each one, and the loop runs again; "no actionable
+comments" or no CodeRabbit on the PR ends the task. The coder
 reads every review comment on it (CodeRabbit or human) before each run and fixes what is
 valid; a change too large for one review becomes a stack of PRs via `gh stack`. Merge it
 on GitHub, or close it; the graph never merges. With `--no-publish` the deliverable is the
@@ -190,7 +196,8 @@ abox headless . --worktree <task-id> --remove        # drop the worktree; the br
 
 Flags for `run`: `--engine container|docker|fake|auto` (default `container`),
 `--runner <path>`, `--timeout <seconds per box>` (default 3600), `--no-publish`,
-`--publish` (with `--resume`), `--ci-timeout <seconds>` (default 900). Environment:
+`--publish` (with `--resume`), `--ci-timeout <seconds>` (default 900), `--bot-timeout
+<seconds>` (default 900, the wait for CodeRabbit after an approval). Environment:
 `CLAUDE_BOX_SEED_PLUGINS` (default `host`: the host's enabled plugins go into every box;
 `0` keeps boxes bare), `CLAUDE_GRAPH_STATE`, `CLAUDE_GRAPH_RUNNER`.
 

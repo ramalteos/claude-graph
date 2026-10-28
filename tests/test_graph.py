@@ -317,7 +317,7 @@ def test_publish_pushes_opens_a_draft_pr_and_hands_ci_to_qa():
         publish=True,
     )
     assert final["status"] == "done"
-    assert gh.calls == ["push", "ensure_pr", "wait_checks", "mark_ready"]
+    assert gh.calls == ["push", "ensure_pr", "wait_checks", "mark_ready", "bot_present"]
     assert final["pr_url"].endswith("/pull/7") and final["pr_number"] == 7
     assert final["ci_status"] == "pass" and "build: pass" in final["ci_summary"]
     assert "https://ci/1" in prompt_for(runner, "qa") and "pull/7" in prompt_for(runner, "qa")
@@ -541,3 +541,76 @@ def test_a_label_failure_is_a_note_not_a_failure():
         publish=True,
     )
     assert final["status"] == "done" and "risk label: label: HTTP 403" in final["ci_summary"]
+
+
+def test_coderabbit_findings_after_approval_send_the_task_back_to_the_coder():
+    from fake_github import FakeGitHub
+
+    from claude_graph.github import BotReview
+
+    gh = FakeGitHub(
+        bot=[
+            BotReview("actionable", "CodeRabbit posted 2 actionable comment(s) at T1"),
+            BotReview("clean", "CodeRabbit: no actionable comments at T2"),
+        ]
+    )
+    final, runner = run(
+        {
+            "architect": [PLAN],
+            "coder": [CODED, CODED],
+            "qa": [QA_PASS, QA_PASS],
+            "reviewer": [APPROVE, APPROVE],
+        },
+        github=gh,
+        publish=True,
+    )
+    assert runner.roles() == [
+        "pm",
+        "architect",
+        "coder",
+        "qa",
+        "reviewer",
+        "coder",
+        "qa",
+        "reviewer",
+    ]
+    assert final["status"] == "done" and final["bot_review"].startswith("CodeRabbit: no actionable")
+    assert gh.calls.count("mark_ready") == 2 and gh.calls.count("wait_bot_review") == 2
+    assert "After approval, CodeRabbit posted 2 actionable" in prompt_for(runner, "coder", 1)
+    assert "fix the valid ones, reply to the rest" in prompt_for(runner, "coder", 1)
+
+
+def test_no_bot_or_no_bot_review_in_time_finishes_the_task():
+    from fake_github import FakeGitHub
+
+    from claude_graph.github import BotReview
+
+    silent = FakeGitHub()
+    final, runner = run(
+        {"architect": [PLAN], "coder": [CODED], "qa": [QA_PASS], "reviewer": [APPROVE]},
+        github=silent,
+        publish=True,
+    )
+    assert final["status"] == "done" and "wait_bot_review" not in silent.calls
+    slow = FakeGitHub(bot=[BotReview("none", "no CodeRabbit review within 1 s")])
+    final, _ = run(
+        {"architect": [PLAN], "coder": [CODED], "qa": [QA_PASS], "reviewer": [APPROVE]},
+        github=slow,
+        publish=True,
+    )
+    assert final["status"] == "done" and final["bot_review"] == "no CodeRabbit review within 1 s"
+
+
+def test_coderabbit_findings_at_the_cap_exhaust_the_task():
+    from fake_github import FakeGitHub
+
+    from claude_graph.github import BotReview
+
+    gh = FakeGitHub(bot=[BotReview("actionable", "CodeRabbit posted 1 actionable comment(s) at T")])
+    final, _ = run(
+        {"architect": [PLAN], "coder": [CODED], "qa": [QA_PASS], "reviewer": [APPROVE]},
+        max_iterations=1,
+        github=gh,
+        publish=True,
+    )
+    assert final["status"] == "exhausted" and final["review_verdict"] == "changes"

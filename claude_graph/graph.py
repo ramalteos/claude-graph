@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -30,8 +31,9 @@ def build_graph(
     checkpointer: Any = None,
     github: GitHub | None = None,
     ci_timeout_s: int = 900,
+    bot_timeout_s: int = 900,
 ) -> CompiledStateGraph:
-    nodes = _Nodes(runner, settings or Settings(), github, ci_timeout_s)
+    nodes = _Nodes(runner, settings or Settings(), github, ci_timeout_s, bot_timeout_s)
     g = StateGraph(TaskState)
     g.add_node("pm", nodes.pm)
     g.add_node("architect", nodes.architect)
@@ -125,11 +127,13 @@ class _Nodes:
         settings: Settings,
         github: GitHub | None = None,
         ci_timeout_s: int = 900,
+        bot_timeout_s: int = 900,
     ) -> None:
         self.runner = runner
         self.settings = settings
         self.github = github
         self.ci_timeout_s = ci_timeout_s
+        self.bot_timeout_s = bot_timeout_s
 
     def _run(self, role: str, state: TaskState) -> tuple[BoxResult, int]:
         attempt = _attempts(state, role) + 1
@@ -261,6 +265,7 @@ class _Nodes:
         return update
 
     def reviewer(self, state: TaskState) -> TaskState:
+        started = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
         res, attempt = self._run("reviewer", state)
         report = None if _box_failed(res) else parse_report(res.result_text, ReviewReport)
         update = self._update(state, "reviewer", attempt, res, report is not None)
@@ -286,6 +291,28 @@ class _Nodes:
                     self.github.mark_ready(Path(state["repo"]), state["pr_number"])
                 except PublishError:
                     pass  # the verdict stands; the PR just stays a draft
-        elif state["iteration"] >= state["max_iterations"]:
+                self._after_approval(state, update, started)
+        if update["review_verdict"] != "approve" and state["iteration"] >= state["max_iterations"]:
             update["status"] = "exhausted"
         return update
+
+    def _after_approval(self, state: TaskState, update: TaskState, started: str) -> None:
+        """The review bot (CodeRabbit) only reviews a PR once it is ready, so its findings land
+        after our approval: wait for them, and send actionable ones back to the coder."""
+        assert self.github is not None
+        repo, number = Path(state["repo"]), state["pr_number"]
+        try:
+            if not self.github.bot_present(repo, number):
+                return
+            bot = self.github.wait_bot_review(repo, number, started, self.bot_timeout_s)
+        except PublishError as e:
+            update["bot_review"] = f"could not read the review bot: {e}"
+            return
+        update["bot_review"] = bot.summary
+        if bot.status == "actionable":
+            update["status"] = "running"
+            update["review_verdict"] = "changes"
+            update["review_notes"] = (
+                f"{update['review_notes']}\n\nAfter approval, {bot.summary}. Read every "
+                f"CodeRabbit comment on PR #{number}; fix the valid ones, reply to the rest."
+            ).strip()

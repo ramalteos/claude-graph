@@ -97,16 +97,6 @@ def test_end_to_end_with_the_fake_runner(env, capsys):
     assert "ENGINE=fake" in argv
 
 
-def test_resume_of_a_finished_task_launches_nothing(env, capsys):
-    tmp, repo = env
-    run_cli("run", repo, "x", "--task-id", "t1", "--engine", "fake", "--runner", FAKE)
-    (tmp / "argv.headless").unlink()
-    rc = run_cli("run", repo, "--resume", "t1", "--engine", "fake", "--runner", FAKE)
-    assert rc == 0
-    assert "task t1: done" in capsys.readouterr().out
-    assert not (tmp / "argv.headless").exists()
-
-
 def test_duplicate_task_id_is_refused(env, capsys):
     tmp, repo = env
     run_cli("run", repo, "x", "--task-id", "t1", "--engine", "fake", "--runner", FAKE)
@@ -605,3 +595,19 @@ def test_a_task_id_never_collides_with_an_existing_branch(env, capsys):
         == 0
     )
     assert "branch:     add-route-2" in capsys.readouterr().out
+
+
+def test_resume_of_a_done_task_sends_the_coder_to_the_review_comments(env, capsys):
+    tmp, repo = env
+    assert run_cli("run", repo, "x", "--task-id", "t1", "--engine", "fake", "--runner", FAKE) == 0
+    assert "task t1: done" in capsys.readouterr().out
+    rc = run_cli("run", repo, "--resume", "t1", "--engine", "fake", "--runner", FAKE)
+    assert rc == 0 and "task t1: done" in capsys.readouterr().out
+    names = _names(tmp)
+    assert names[names.index("graph-t1-reviewer-1") + 1 :] == [
+        "graph-t1-coder-2",
+        "graph-t1-qa-2",
+        "graph-t1-reviewer-2",
+    ]
+    brief = (tmp / "state" / "logs" / "t1" / "02-coder.prompt.md").read_text()
+    assert "Resumed after completion: read every review comment" in brief

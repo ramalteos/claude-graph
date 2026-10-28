@@ -15,6 +15,10 @@ case "$1 $2" in
                [ -n "${FAKE_GH_CHECKS:-}" ] && [ -f "$FAKE_GH_CHECKS" ] && cat "$FAKE_GH_CHECKS" || echo '[]' ;;
   "pr ready")  exit 0 ;;
   "label list") printf '%s' "${FAKE_GH_LABELS:-[]}" ;;
+  "api --paginate") case "$3" in
+                      */reviews)  printf '%s' "${FAKE_GH_REVIEWS:-[]}" ;;
+                      */comments) printf '%s' "${FAKE_GH_COMMENTS:-[]}" ;;
+                    esac ;;
   "label create") exit 0 ;;
   "pr edit")   exit 0 ;;
   *)           exit 0 ;;
