@@ -407,9 +407,7 @@ def test_publish_uses_the_coder_pr_title_and_body_and_updates_them_each_run():
     assert (
         gh.titles[0] == "feat(x): add y [DPT-0]" and gh.titles[-1] == "feat(x): add y and z [DPT-0]"
     )
-    assert (
-        gh.bodies[-1].startswith("## What\n- y\n- z") and "t1" in gh.bodies[-1]
-    )  # footer names the task
+    assert gh.bodies[-1] == "## What\n- y\n- z"
     assert gh.calls.count("update_pr") == 1  # the second run edits the existing PR
 
 

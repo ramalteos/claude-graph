@@ -220,10 +220,7 @@ class _Nodes:
         assert self.github is not None
         repo, branch = Path(state["repo"]), state["branch"]
         title = state.get("pr_title") or state["request"].strip().splitlines()[0][:70]
-        body = (state.get("pr_body") or state.get("spec", "")[:3000]).rstrip() + (
-            f"\n\nTask `{state['task_id']}`, opened by claude-graph; reviewed on this pull "
-            "request, never merged by it."
-        )
+        body = (state.get("pr_body") or state.get("spec", "")[:3000]).rstrip()
         try:
             self.github.push(repo, branch)
             pr = self.github.ensure_pr(

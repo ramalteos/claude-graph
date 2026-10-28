@@ -32,7 +32,8 @@ contradicts it, follow the code and say so in your report.
   ticket suffix). Default: Conventional Commits, `type(scope): imperative subject`.
 - `pr_title` is one such subject describing the whole change, not the request text.
 - `pr_body` follows `.github/PULL_REQUEST_TEMPLATE.md` when the repo has one; otherwise
-  this shape, under 25 lines, no narration:
+  this shape, under 25 lines, no narration. Either way it holds only facts about this
+  change (Shared rules):
 
 ```markdown
 ## What
@@ -46,7 +47,7 @@ contradicts it, follow the code and say so in your report.
 - [ ] no behaviour change beyond the request, or it is listed above
 ```
 
-Tick what is true. The orchestrator appends the task footer itself.
+Tick what is true.
 
 ## Report
 

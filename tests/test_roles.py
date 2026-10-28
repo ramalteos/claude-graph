@@ -153,6 +153,6 @@ def test_pm_slug_instruction_asks_for_a_type_prefix_and_no_tool_name():
 
 
 @pytest.mark.parametrize("role", ROLE_NAMES)
-def test_commit_trailers_are_never_a_finding(role):
+def test_pr_text_holds_only_facts_about_the_change(role):
     text = system_prompt(role)
-    assert "Commit trailers" in text and "not findings" in text
+    assert "only facts about this change" in text and "commit trailers" in text
