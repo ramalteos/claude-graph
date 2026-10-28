@@ -68,10 +68,16 @@ def parser() -> argparse.ArgumentParser:
         help="path to the box runner (abox); default: abox or claude-box on PATH",
     )
     run.add_argument("--timeout", type=int, default=3600, help="seconds per box")
-    run.add_argument(
+    pub = run.add_mutually_exclusive_group()
+    pub.add_argument(
         "--no-publish",
         action="store_true",
         help="no push, no pull request, no CI: QA runs everything locally",
+    )
+    pub.add_argument(
+        "--publish",
+        action="store_true",
+        help="with --resume: turn the pull-request flow on for a task started with --no-publish",
     )
     run.add_argument(
         "--ci-timeout", type=int, default=900, help="seconds to wait for the PR's checks"
@@ -161,7 +167,9 @@ def cmd_run(args: argparse.Namespace) -> int:
             snapshot = probe.get_state(config)
             if not snapshot.values:
                 raise CliError(f"no such task: {task_id}")
-            publish = bool(snapshot.values.get("publish")) and not args.no_publish
+            publish = _resume_publish(
+                snapshot.values, force_on=args.publish, force_off=args.no_publish
+            )
         else:
             publish = not args.no_publish
         graph = build_graph(
@@ -173,17 +181,27 @@ def cmd_run(args: argparse.Namespace) -> int:
         )
         if args.resume:
             snapshot = graph.get_state(config)
-            if snapshot.values["status"] == "done":
-                print(summary(snapshot.values))
+            values = snapshot.values
+            if values["status"] == "done":
+                print(summary(values))
                 return 0
+            # Turning publish on for a task that never had it: the branch needs its PR, so
+            # resume at the publish step unless a coder run is the pending node anyway.
+            turning_on = publish and not values.get("publish")
+            extra: dict[str, Any] = {}
+            if turning_on:
+                extra = {
+                    "publish": True,
+                    "base_branch": values.get("base_branch") or _current_branch(repo),
+                }
             if not snapshot.next:  # failed or exhausted: the graph ended, put it back on
-                _reopen(graph, config, snapshot.values, args.max_iterations)
-            elif args.max_iterations:
-                graph.update_state(
-                    config,
-                    {"max_iterations": args.max_iterations},
-                    as_node=_last_node(snapshot.values),
-                )
+                _reopen(graph, config, values, args.max_iterations, extra)
+            elif args.max_iterations or turning_on:
+                coded = any(s["role"] == "coder" for s in values.get("steps", []))
+                at = "coder" if turning_on and coded and "coder" not in snapshot.next else None
+                if args.max_iterations:
+                    extra["max_iterations"] = args.max_iterations
+                graph.update_state(config, extra, as_node=at or _last_node(values))
             print(
                 f"resuming {task_id} at {', '.join(graph.get_state(config).next)}", file=sys.stderr
             )
@@ -226,12 +244,27 @@ def _last_node(values: TaskState) -> str:
     return steps[-1]["role"] if steps else START
 
 
-def _reopen(graph: Any, config: dict, values: TaskState, new_cap: int | None) -> None:
+def _resume_publish(values: TaskState, *, force_on: bool, force_off: bool) -> bool:
+    """`--publish` / `--no-publish` win; a task from before the publish step existed (no
+    `publish` key) gets it; otherwise the task keeps what it was started with."""
+    if force_off:
+        return False
+    if force_on or "publish" not in values:
+        return True
+    return bool(values["publish"])
+
+
+def _reopen(
+    graph: Any,
+    config: dict,
+    values: TaskState,
+    new_cap: int | None,
+    extra: dict[str, Any] | None = None,
+) -> None:
     """Put a failed/exhausted task back on the graph: failed replays from the node before the
-    failed one; exhausted takes a higher cap and re-routes from the exhausting node.
-    """
+    failed one; exhausted takes a higher cap and re-routes from the exhausting node."""
     steps = values.get("steps", [])
-    update: dict[str, Any] = {"status": "running"}
+    update: dict[str, Any] = {"status": "running", **(extra or {})}
     if values["status"] == "exhausted":
         cap = values["max_iterations"]
         if not new_cap or new_cap <= cap:

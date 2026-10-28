@@ -150,7 +150,10 @@ claude-graph logs health-route qa                     # the latest QA log
 SIGTERM or a hangup from a closed terminal (the box is stopped and its record closed;
 `--resume` continues from the last finished node). Under `nohup` a hangup stays ignored.
 `--resume` also reopens a finished task: a `failed` one runs the role that failed again; an
-`exhausted` one needs `--max-iterations` above its old cap and continues the loop.
+`exhausted` one needs `--max-iterations` above its old cap and continues the loop. A task
+started before the pull-request flow existed gets it on resume (`--no-publish` to keep it
+local); `--resume … --publish` turns it on for a task started with `--no-publish`. Either
+way the resumed task goes through the publish step before QA runs again.
 
 ## Take the result
 
@@ -169,7 +172,7 @@ abox headless . --worktree health-route --remove          # drop the worktree; t
 
 Flags for `run`: `--engine container|docker|fake|auto` (default `container`),
 `--runner <path>`, `--timeout <seconds per box>` (default 3600), `--no-publish`,
-`--ci-timeout <seconds>` (default 900).
+`--publish` (with `--resume`), `--ci-timeout <seconds>` (default 900).
 
 ### Dashboard (`ui`)
 

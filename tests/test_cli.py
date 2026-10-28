@@ -447,3 +447,63 @@ def test_no_publish_keeps_github_out_of_it(env, capsys):
     assert rc == 0
     assert not (tmp / "ghstate" / "argv.log").exists()
     assert "pr:" not in capsys.readouterr().out
+
+
+def test_resume_publish_decision():
+    from claude_graph.cli import _resume_publish
+
+    legacy = {"task_id": "t", "status": "running"}  # created before the publish step existed
+    assert _resume_publish(legacy, force_on=False, force_off=False) is True
+    assert _resume_publish(legacy, force_on=False, force_off=True) is False
+    local = {**legacy, "publish": False}
+    assert _resume_publish(local, force_on=False, force_off=False) is False
+    assert _resume_publish(local, force_on=True, force_off=False) is True
+    assert _resume_publish({**legacy, "publish": True}, force_on=False, force_off=False) is True
+
+
+def test_resume_with_publish_opens_the_pr_for_a_local_task(env, capsys, monkeypatch):
+    tmp, repo = env
+    failing = json.dumps(
+        '```json\n{"spec":"s","acceptance_criteria":[],"plan":"p","summary":"s","passed":false,"report":"r"}\n```'
+    )
+    monkeypatch.setenv("FAKE_RESULT", failing)
+    rc = run_cli(
+        "run",
+        repo,
+        "x",
+        "--task-id",
+        "t1",
+        "--no-publish",
+        "--max-iterations",
+        "1",
+        "--engine",
+        "fake",
+        "--runner",
+        FAKE,
+    )
+    assert rc == 1 and not (tmp / "ghstate" / "argv.log").exists()
+    passing = json.dumps(
+        '```json\n{"summary":"s","passed":true,"report":"r","verdict":"approve","notes":"n"}\n```'
+    )
+    monkeypatch.setenv("FAKE_RESULT", passing)
+    rc = run_cli(
+        "run",
+        repo,
+        "--resume",
+        "t1",
+        "--publish",
+        "--max-iterations",
+        "2",
+        "--engine",
+        "fake",
+        "--runner",
+        FAKE,
+    )
+    assert rc == 0, capsys.readouterr()
+    snap = json.loads((tmp / "state" / "tasks" / "t1.json").read_text())
+    assert snap["publish"] is True and snap["base_branch"] == "main"
+    assert snap["pr_url"].endswith("/pull/7") and snap["status"] == "done"
+    assert (
+        "pr create --draft --head claude-graph/t1 --base main"
+        in (tmp / "ghstate" / "argv.log").read_text()
+    )
