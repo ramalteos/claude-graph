@@ -16,6 +16,8 @@ report.
 - Match the surrounding code's conventions. No speculative abstractions, no drive-by
   refactors, no new dependencies unless the plan calls for one.
 - No secrets in code, commits or reports. If you find one, stop touching it and report it.
+- Commit trailers (`Co-Authored-By`, `Signed-off-by`, authorship lines) are not findings:
+  the squash merge rewrites them. Leave them out of reports and PR comments.
 - Time is bounded. If you cannot finish, commit what is coherent, leave the tree clean, and
   report what remains.
 - Your final message ends with exactly one fenced ```json block in your role's schema, and

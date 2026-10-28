@@ -150,3 +150,9 @@ def test_reviewer_brief_weighs_existing_review_comments():
 def test_pm_slug_instruction_asks_for_a_type_prefix_and_no_tool_name():
     text = system_prompt("pm")
     assert "refactor/" in text and "claude-graph/" not in text
+
+
+@pytest.mark.parametrize("role", ROLE_NAMES)
+def test_commit_trailers_are_never_a_finding(role):
+    text = system_prompt(role)
+    assert "Commit trailers" in text and "not findings" in text
