@@ -57,7 +57,7 @@ def test_models_and_efforts_come_from_settings():
         settings=settings,
     )
     by_role = {c["role"]: c for c in runner.calls}
-    assert (by_role["coder"]["model"], by_role["coder"]["effort"]) == ("sonnet", "high")
+    assert (by_role["coder"]["model"], by_role["coder"]["effort"]) == ("sonnet", "xhigh")
     assert (by_role["qa"]["model"], by_role["qa"]["effort"]) == ("opus", "low")
 
 
@@ -70,7 +70,7 @@ def test_default_models_per_role():
         "qa": "opus",
         "reviewer": "opus",
     }
-    assert {c["effort"] for c in runner.calls} == {"high"}
+    assert {c["effort"] for c in runner.calls} == {"xhigh"}
 
 
 def test_qa_failure_loops_to_coder_with_the_report():

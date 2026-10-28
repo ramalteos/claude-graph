@@ -150,7 +150,7 @@ def test_settings_from_repo_toml(env):
     calls = [c.splitlines() for c in (tmp / "argv.headless").read_text().split("===\n") if c]
     by_role = {c[c.index("--name") + 1].split("-")[2]: c for c in calls}
     assert by_role["coder"][by_role["coder"].index("--model") + 1] == "sonnet"
-    assert by_role["coder"][by_role["coder"].index("--effort") + 1] == "high"
+    assert by_role["coder"][by_role["coder"].index("--effort") + 1] == "xhigh"
     assert by_role["qa"][by_role["qa"].index("--model") + 1] == "opus"
     assert by_role["qa"][by_role["qa"].index("--effort") + 1] == "low"
 

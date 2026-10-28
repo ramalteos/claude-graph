@@ -10,7 +10,7 @@ from pathlib import Path
 DEFAULT_ENGINE = "container"  # Apple `container`; CLAUDE_BOX_ENGINE semantics
 
 DEFAULT_MODELS = {role: "opus" for role in ("pm", "architect", "coder", "qa", "reviewer")}
-DEFAULT_EFFORT = "high"
+DEFAULT_EFFORT = "xhigh"
 
 
 @dataclass(frozen=True)

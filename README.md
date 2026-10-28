@@ -220,10 +220,10 @@ Actions (`--actions` only; destructive ones ask you to type the task id):
 [models]
 coder = "sonnet"      # override per role
 [efforts]
-qa = "low"            # default for every role: high
+qa = "low"            # default for every role: xhigh
 ```
 
-Defaults: every role on `opus` at effort `high`. Values are Claude Code `--model` /
+Defaults: every role on `opus` at effort `xhigh`. Values are Claude Code `--model` /
 `--effort` arguments.
 
 ## How a step works
