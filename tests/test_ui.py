@@ -56,7 +56,7 @@ def make_repo(path: Path) -> str:
     base = subprocess.run(
         ["git", "-C", str(path), "rev-parse", "HEAD"], capture_output=True, text=True, check=True
     ).stdout.strip()
-    subprocess.run(["git", "-C", str(path), "checkout", "-qb", "claude-graph/t1"], check=True)
+    subprocess.run(["git", "-C", str(path), "checkout", "-qb", "t1"], check=True)
     (path / "a.txt").write_text("one\ntwo\n")
     subprocess.run(["git", "-C", str(path), "commit", "-qam", "add two"], check=True, env=env)
     subprocess.run(["git", "-C", str(path), "checkout", "-q", "main"], check=True)
@@ -79,7 +79,7 @@ def world(tmp_path, monkeypatch):
                 "status": "running",
                 "request": "add route",
                 "repo": str(tmp_path / "repo"),
-                "branch": "claude-graph/t1",
+                "branch": "t1",
                 "base_sha": base,
                 "worktree": str(tmp_path / "wt"),
                 "iteration": 1,

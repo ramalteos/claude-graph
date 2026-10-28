@@ -26,7 +26,7 @@ def result(
         log_path=Path("/tmp/fake.log"),
         box="claude-box-graph-t1-x-1",
         worktree=Path("/tmp/wt/t1") if meta else None,
-        branch="claude-graph/t1" if meta else None,
+        branch="t1" if meta else None,
         base_sha="abc123" if meta else None,
     )
 

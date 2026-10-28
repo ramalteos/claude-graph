@@ -89,7 +89,7 @@ def test_end_to_end_with_the_fake_runner(env, capsys):
     out = capsys.readouterr().out
     assert rc == 0
     assert "task t1: done" in out
-    assert "branch:     claude-graph/t1" in out
+    assert "branch:     t1" in out
     assert (tmp / "state" / "tasks" / "t1.json").is_file()
     logs = sorted(p.name for p in (tmp / "state" / "logs" / "t1").glob("*.log"))
     assert logs == ["01-architect.log", "01-coder.log", "01-pm.log", "01-qa.log", "01-reviewer.log"]
@@ -433,7 +433,7 @@ def test_a_run_opens_a_draft_pr_against_the_checked_out_branch(env, capsys):
     assert rc == 0
     assert "pr:         https://github.com/o/r/pull/7" in out and "ci:         none" in out
     log = (tmp / "ghstate" / "argv.log").read_text()
-    assert "pr create --draft --head claude-graph/t1 --base main" in log
+    assert "pr create --draft --head t1 --base main" in log
     assert "pr ready 7" in log
     snap = json.loads((tmp / "state" / "tasks" / "t1.json").read_text())
     assert snap["base_branch"] == "main" and snap["publish"] is True
@@ -503,10 +503,7 @@ def test_resume_with_publish_opens_the_pr_for_a_local_task(env, capsys, monkeypa
     snap = json.loads((tmp / "state" / "tasks" / "t1.json").read_text())
     assert snap["publish"] is True and snap["base_branch"] == "main"
     assert snap["pr_url"].endswith("/pull/7") and snap["status"] == "done"
-    assert (
-        "pr create --draft --head claude-graph/t1 --base main"
-        in (tmp / "ghstate" / "argv.log").read_text()
-    )
+    assert "pr create --draft --head t1 --base main" in (tmp / "ghstate" / "argv.log").read_text()
 
 
 def test_resume_refuses_a_task_another_orchestrator_is_driving(env, capsys):
@@ -564,7 +561,8 @@ def test_an_orchestrator_releases_only_its_own_pid_file(tmp_path):
     ("text", "slug"),
     [
         (
-            "Check partnership service and suggest me an api which can be optimized and create the api",
+            "Check partnership service and suggest me an api which can be optimized "
+            "and create the api",
             "check-partnership-service-suggest-api",
         ),
         ("Add a /health endpoint that reports DB status", "add-health-endpoint-reports-db"),
@@ -594,4 +592,14 @@ def test_a_repeated_request_gets_a_numbered_task_id(env, capsys):
         )
     ids = sorted(p.stem for p in (tmp / "state" / "tasks").glob("*.json"))
     assert ids == ["add-route", "add-route-2"]
-    assert "branch:     claude-graph/add-route-2" in capsys.readouterr().out
+    assert "branch:     add-route-2" in capsys.readouterr().out
+
+
+def test_a_task_id_never_collides_with_an_existing_branch(env, capsys):
+    tmp, repo = env
+    subprocess.run(["git", "-C", str(repo), "branch", "add-route"], check=True)
+    assert (
+        run_cli("run", repo, "add a route", "--no-publish", "--engine", "fake", "--runner", FAKE)
+        == 0
+    )
+    assert "branch:     add-route-2" in capsys.readouterr().out

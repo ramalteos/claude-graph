@@ -168,7 +168,10 @@ def cmd_run(args: argparse.Namespace) -> int:
     with SqliteSaver.from_conn_string(str(root / "checkpoints.sqlite")) as saver:
         probe = build_graph(runner, load_settings(repo), checkpointer=saver)
         if not args.resume and not args.task_id:
-            task_id = _free_id(task_id, lambda t: bool(probe.get_state(_cfg(t)).values))
+            task_id = _free_id(
+                task_id,
+                lambda t: bool(probe.get_state(_cfg(t)).values) or _branch_exists(repo, t),
+            )
         config = _cfg(task_id)
         holder = Store(root, None, args.engine).pid(task_id)
         if holder:
@@ -256,6 +259,15 @@ def _free_id(base: str, taken: Callable[[str], bool]) -> str:
     while taken(candidate):
         candidate, n = f"{base}-{n}", n + 1
     return candidate
+
+
+def _branch_exists(repo: Path, name: str) -> bool:
+    proc = subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "--verify", "-q", f"refs/heads/{name}"],
+        capture_output=True,
+        check=False,
+    )
+    return proc.returncode == 0
 
 
 def _cfg(task_id: str) -> dict:

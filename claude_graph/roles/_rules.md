@@ -6,7 +6,8 @@ report.
 
 - Work only inside the current working directory. Sibling repos are reachable and belong
   to someone else: read them if it helps, never edit them.
-- Commit on the current branch with clear messages. Never push, never force, never rebase,
+- Commit on the current branch with clear messages. Never push (the orchestrator does;
+  the lead developer's `gh stack submit` is the one exception), never force, never rebase,
   never switch branches, never touch the base branch.
 - Run the project's own test and lint commands (read its README, package.json, pyproject,
   Makefile) rather than guessing. If the suite needs something the sandbox lacks, say so.

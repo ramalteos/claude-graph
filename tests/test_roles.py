@@ -36,18 +36,18 @@ def test_unknown_role_is_an_error():
 
 
 def test_every_prompt_names_task_branch_base_and_request():
-    s = state(branch="claude-graph/t1", base_sha="abc123", iteration=2)
+    s = state(branch="t1", base_sha="abc123", iteration=2)
     for role in ROLE_NAMES:
         text = user_prompt(role, s)
         assert "# Task t1" in text
-        assert "claude-graph/t1" in text
+        assert "t1" in text
         assert "abc123" in text
         assert "add a /health route" in text
         assert "attempt 2 of 3" in text
 
 
 def test_branch_is_predictable_before_the_first_box():
-    assert "claude-graph/t1" in user_prompt("architect", state())
+    assert "t1" in user_prompt("architect", state())
 
 
 def test_first_coder_attempt_has_the_plan_and_no_history():
@@ -126,3 +126,27 @@ def test_coder_persona_asks_for_a_commit_style_title_and_a_checklist_body():
 def test_pm_persona_asks_for_a_branch_slug():
     text = system_prompt("pm")
     assert '"slug"' in text and "kebab-case" in text
+
+
+def test_coder_persona_knows_when_and_how_to_stack():
+    text = system_prompt("coder")
+    for needle in ("gh stack init", "gh stack add", "gh stack submit", "gh stack merge"):
+        assert needle in text
+
+
+def test_coder_brief_with_a_pr_starts_from_its_review_comments():
+    text = user_prompt(
+        "coder", state(publish=True, pr_url="https://github.com/o/r/pull/7", pr_number=7)
+    )
+    assert "gh pr view 7 --comments" in text and "pulls/7/comments" in text
+    assert "CodeRabbit" in text
+
+
+def test_reviewer_brief_weighs_existing_review_comments():
+    text = user_prompt("reviewer", state(pr_url="https://github.com/o/r/pull/7", pr_number=7))
+    assert "pulls/7/comments" in text and "CodeRabbit" in text
+
+
+def test_pm_slug_instruction_asks_for_a_type_prefix_and_no_tool_name():
+    text = system_prompt("pm")
+    assert "refactor/" in text and "claude-graph/" not in text

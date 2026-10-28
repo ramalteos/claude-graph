@@ -3,7 +3,8 @@
 A LangGraph harness for coding tasks. One request goes through five role agents —
 **pm → architect → coder → qa → reviewer** — with bounded loops back on failure, and
 comes out as a reviewed draft pull request. The product manager writes the spec and
-acceptance criteria first; every later role works against them. Every agent is a headless
+acceptance criteria first; every later role works against them; the coder is a lead
+developer who owns the implementation, its PR and its review comments. Every agent is a headless
 Claude Code session running inside a sandbox, launched with Apple `container` by `abox`,
 the runner from the [sandbox repo](https://github.com/ramalteos/claude-box), vendored
 here as the `sandbox/` git submodule.
@@ -129,10 +130,11 @@ git checkout (so `claude-graph run myrepo "…"` works from its parent folder) o
 as a path (`./x`, `../x`, `/x`) to a directory; a bare word that merely matches a plain
 folder name is part of the request.
 
-What happens: a worktree on branch `claude-graph/<task-id>` is cut from the repo's HEAD
-inside a box (the task id defaults to a slug of the request, `-2` on a repeat; `--task-id`
-names it); the pm then names the change and the branch becomes `claude-graph/<slug>`.
-One box per role runs in the worktree — pm, architect, coder, qa, reviewer —
+What happens: a worktree on a branch named after the task id is cut from the repo's HEAD
+inside a box (the task id defaults to a slug of the request, `-2` when that id or branch
+already exists; `--task-id` names it); the pm then names the change and the branch is
+renamed to its `<type>/<what>` (for example `refactor/partnership-product-read`). One box
+per role runs in the worktree — pm, architect, coder, qa, reviewer —
 looping back on a QA fail or a reviewer's `changes` (to the coder) or `redesign` (to the
 architect), at most `--max-iterations` coder runs (default 10). After every coder run the
 host pushes the branch, opens the draft PR against the branch that was checked out when
@@ -159,17 +161,19 @@ way the resumed task goes through the publish step before QA runs again.
 
 ## Take the result
 
-The deliverable is the pull request from `claude-graph/<slug>`, a draft until the
-reviewer approves, with the reviewer's findings as a review comment and CI run on it.
-Merge it on GitHub, or close it; the graph never merges. With `--no-publish` the
-deliverable is the local branch instead:
+The deliverable is the pull request from the pm-named branch, a draft until the reviewer
+approves, with the reviewer's findings as a review comment and CI run on it. The coder
+reads every review comment on it (CodeRabbit or human) before each run and fixes what is
+valid; a change too large for one review becomes a stack of PRs via `gh stack`. Merge it
+on GitHub, or close it; the graph never merges. With `--no-publish` the deliverable is the
+local branch instead:
 
 ```sh
 cd <repo>
-git log main..claude-graph/health-route
-git diff main...claude-graph/health-route
-git merge claude-graph/health-route          # or cherry-pick, or branch -D to discard
-abox headless . --worktree health-route --remove          # drop the worktree; the branch stays
+git log main..refactor/partnership-product-read
+git diff main...refactor/partnership-product-read
+git merge refactor/partnership-product-read          # or cherry-pick, or branch -D to discard
+abox headless . --worktree <task-id> --remove        # drop the worktree; the branch stays
 ```
 
 Flags for `run`: `--engine container|docker|fake|auto` (default `container`),

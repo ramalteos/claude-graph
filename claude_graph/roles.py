@@ -60,10 +60,20 @@ def user_prompt(role: str, state: TaskState) -> str:
 
 def _coder_pr(state: TaskState) -> str:
     where = f"PR {state['pr_url']}" if state.get("pr_url") else "a draft pull request"
-    return (
+    text = (
         f"After each of your runs the orchestrator pushes this branch, keeps {where} current "
         "and waits for its CI. Do not push."
     )
+    if state.get("pr_number"):
+        n = state["pr_number"]
+        text += (
+            f"\n\nStart from the review comments already on the PR: `gh pr view {n} --comments` "
+            f"and, for inline ones, `gh api repos/{{owner}}/{{repo}}/pulls/{n}/comments` "
+            "(CodeRabbit and human reviewers alike). Fix each valid finding, reply on its "
+            "thread with what you did, and list the ones you declined, with the reason, in "
+            "your summary."
+        )
+    return text
 
 
 def _qa_ci(state: TaskState) -> str:
@@ -89,7 +99,11 @@ def _reviewer_pr(state: TaskState) -> str | None:
         f"CI result: {state.get('ci_status')}.\n{state.get('ci_summary') or ''}\n\n"
         f"Post your findings as a review on the pull request: write them to a file, then "
         f"`gh pr review {n} --comment --body-file <file>` (the token is the PR author's, so "
-        "GitHub allows a comment review only). Your verdict goes in the JSON block."
+        "GitHub allows a comment review only). Your verdict goes in the JSON block.\n\n"
+        f"Weigh the review comments already there (`gh pr view {n} --comments`, inline: "
+        f"`gh api repos/{{owner}}/{{repo}}/pulls/{n}/comments`; CodeRabbit included): a "
+        "valid finding the coder left unaddressed is a `changes` item in your notes; one "
+        "that was fixed or rightly declined is not."
     )
 
 

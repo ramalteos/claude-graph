@@ -22,10 +22,10 @@ Keep it under about 100 lines. Be concrete: names, paths, example inputs and out
 
 ## Branch
 
-`"slug"` names the branch: two to five words, kebab-case, `[a-z0-9-]`, at most 39
-characters, describing the change rather than quoting the request (for
-`optimise the product reads behind GET /partnership/:id` → `partnership-product-read`).
-The branch becomes `claude-graph/<slug>`.
+`"slug"` is the branch name: `<type>/<what>`, the type from the repo's commit convention
+(`feat`, `fix`, `refactor`, `chore`, …), `<what>` two to five kebab-case words describing
+the change rather than quoting the request, `[a-z0-9/-]`, at most 60 characters. For
+`optimise the product reads behind GET /partnership/:id` → `refactor/partnership-product-read`.
 
 ## Report
 

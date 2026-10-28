@@ -18,7 +18,7 @@ TIMEOUT_EXIT = 124  # what `timeout(1)` reports; a stopped box is reported the s
 START_FAILED_EXIT = 127  # what a shell reports for a command it could not run
 INTERRUPT_EXIT = 130  # the shell convention for SIGINT
 BOX_PREFIX = "claude-box-"  # the runner prepends this to every --name
-BRANCH_PREFIX = "claude-graph/"  # branches this harness cuts
+BRANCH_PREFIX = ""  # the task branch is the task id until the pm names the change
 
 
 @dataclass(frozen=True)

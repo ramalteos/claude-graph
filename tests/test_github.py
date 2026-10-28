@@ -24,7 +24,7 @@ def world(tmp_path, monkeypatch):
     subprocess.run(["git", "init", "-q", "-b", "main", str(repo)], check=True)
     subprocess.run([*git, "commit", "-q", "--allow-empty", "-m", "init"], check=True)
     subprocess.run([*git, "remote", "add", "origin", str(bare)], check=True)
-    subprocess.run([*git, "branch", "claude-graph/t1"], check=True)
+    subprocess.run([*git, "branch", "t1"], check=True)
     return repo, bare, tmp_path
 
 
@@ -34,9 +34,9 @@ def argv_log(tmp_path):
 
 def test_push_publishes_the_branch_to_origin(world):
     repo, bare, _ = world
-    GhGitHub().push(repo, "claude-graph/t1")
+    GhGitHub().push(repo, "t1")
     out = subprocess.run(
-        ["git", "-C", str(bare), "rev-parse", "--verify", "refs/heads/claude-graph/t1"],
+        ["git", "-C", str(bare), "rev-parse", "--verify", "refs/heads/t1"],
         capture_output=True,
         text=True,
     )
@@ -49,23 +49,19 @@ def test_push_failure_is_a_publish_error(world, tmp_path):
         ["git", "-C", str(repo), "remote", "set-url", "origin", str(tmp_path / "nope")], check=True
     )
     with pytest.raises(PublishError, match="nope"):
-        GhGitHub().push(repo, "claude-graph/t1")
+        GhGitHub().push(repo, "t1")
 
 
 def test_ensure_pr_creates_a_draft_once(world):
     repo, _, tmp = world
     gh = GhGitHub()
-    pr = gh.ensure_pr(repo, "claude-graph/t1", "main", "add x", "body")
+    pr = gh.ensure_pr(repo, "t1", "main", "add x", "body")
     assert pr.number == 7 and pr.url.endswith("/pull/7")
-    again = gh.ensure_pr(repo, "claude-graph/t1", "main", "add x", "body")
+    again = gh.ensure_pr(repo, "t1", "main", "add x", "body")
     assert again == pr
     creates = [a for a in argv_log(tmp) if a.startswith("pr create")]
     assert len(creates) == 1
-    assert (
-        "--draft" in creates[0]
-        and "--base main" in creates[0]
-        and "--head claude-graph/t1" in creates[0]
-    )
+    assert "--draft" in creates[0] and "--base main" in creates[0] and "--head t1" in creates[0]
 
 
 def test_wait_checks_reports_none_fail_pass_and_timeout(world, monkeypatch):
@@ -110,14 +106,12 @@ def test_update_pr_edits_title_and_body(world):
 def test_rename_branch_renames_in_the_repo_and_refuses_a_taken_name(world):
     repo, _, _ = world
     gh = GhGitHub()
-    assert gh.rename_branch(repo, "claude-graph/t1", "claude-graph/optimize-product-read") is True
+    assert gh.rename_branch(repo, "t1", "optimize-product-read") is True
     names = subprocess.run(
-        ["git", "-C", str(repo), "branch", "--list", "claude-graph/*"],
+        ["git", "-C", str(repo), "branch", "--list", "*"],
         capture_output=True,
         text=True,
     ).stdout
     assert "optimize-product-read" in names and " t1" not in names
-    subprocess.run(["git", "-C", str(repo), "branch", "claude-graph/other"], check=True)
-    assert (
-        gh.rename_branch(repo, "claude-graph/optimize-product-read", "claude-graph/other") is False
-    )
+    subprocess.run(["git", "-C", str(repo), "branch", "other"], check=True)
+    assert gh.rename_branch(repo, "optimize-product-read", "other") is False

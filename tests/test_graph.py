@@ -1,3 +1,4 @@
+import pytest
 from langgraph.checkpoint.sqlite import SqliteSaver
 
 from claude_graph.graph import Settings, build_graph
@@ -41,7 +42,7 @@ def test_happy_path():
     assert final["review_verdict"] == "approve"
     assert final["iteration"] == 1
     assert (final["branch"], final["base_sha"], final["worktree"]) == (
-        "claude-graph/t1",
+        "t1",
         "abc123",
         "/tmp/wt/t1",
     )
@@ -442,10 +443,10 @@ def test_the_pm_names_the_branch_and_everything_after_uses_it():
     )
     graph = build_graph(runner, Settings(), github=gh)
     final = graph.invoke(initial_state(task_id="t1", request="REQ", repo="/r", publish=True))
-    assert final["status"] == "done" and final["branch"] == "claude-graph/optimize-product-read"
-    assert gh.renamed == [("claude-graph/t1", "claude-graph/optimize-product-read")]
-    assert gh.pushed == ["claude-graph/optimize-product-read"]
-    assert "claude-graph/optimize-product-read" in prompt_for(runner, "coder")
+    assert final["status"] == "done" and final["branch"] == "optimize-product-read"
+    assert gh.renamed == [("t1", "optimize-product-read")]
+    assert gh.pushed == ["optimize-product-read"]
+    assert "optimize-product-read" in prompt_for(runner, "coder")
 
 
 def test_a_bad_or_taken_slug_keeps_the_task_branch():
@@ -459,7 +460,7 @@ def test_a_bad_or_taken_slug_keeps_the_task_branch():
     final = build_graph(runner, Settings(), github=gh).invoke(
         initial_state(task_id="t1", request="REQ", repo="/r", publish=True)
     )
-    assert final["branch"] == "claude-graph/t1" and gh.renamed == []
+    assert final["branch"] == "t1" and gh.renamed == []
     taken = FakeGitHub(rename_ok=False)
     good = result(report({"spec": "S", "acceptance_criteria": [], "slug": "optimize-product-read"}))
     runner = FakeRunner(
@@ -474,4 +475,23 @@ def test_a_bad_or_taken_slug_keeps_the_task_branch():
     final = build_graph(runner, Settings(), github=taken).invoke(
         initial_state(task_id="t1", request="REQ", repo="/r", publish=True)
     )
-    assert final["branch"] == "claude-graph/t1" and taken.pushed == ["claude-graph/t1"]
+    assert final["branch"] == "t1" and taken.pushed == ["t1"]
+
+
+@pytest.mark.parametrize(
+    ("slug", "branch"),
+    [
+        ("refactor/partnership-product-read", "refactor/partnership-product-read"),
+        ("partnership-product-read", "partnership-product-read"),
+        ("Not A Slug!", None),
+        ("a..b", None),
+        ("/leading", None),
+        ("trailing/", None),
+        ("-dash", None),
+        ("x" * 70, None),
+    ],
+)
+def test_the_pm_slug_becomes_the_branch_only_when_it_is_a_sane_ref(slug, branch):
+    from claude_graph.graph import _branch_for
+
+    assert _branch_for(slug) == branch

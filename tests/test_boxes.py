@@ -51,7 +51,7 @@ def test_argv_and_result(tmp_path, argv_file, monkeypatch):
     assert argv[2:4] == ["headless", str(tmp_path)]
     assert after(argv, "--name") == "graph-t1-coder-1"
     assert after(argv, "--worktree") == "t1"
-    assert after(argv, "--branch") == "claude-graph/t1"
+    assert after(argv, "--branch") == "t1"
     assert after(argv, "--model") == "opus"
     assert after(argv, "--effort") == "high"
     assert Path(after(argv, "--prompt-file")).read_text() == "PROMPT\nline 2"
@@ -60,7 +60,7 @@ def test_argv_and_result(tmp_path, argv_file, monkeypatch):
     assert r.result_text == 'done\n```json\n{"summary": "x"}\n```'
     assert r.is_error is False
     assert r.cost_usd == 0.0123
-    assert (r.worktree, r.branch, r.base_sha) == (Path("/tmp/wt/t1"), "claude-graph/t1", "abc123")
+    assert (r.worktree, r.branch, r.base_sha) == (Path("/tmp/wt/t1"), "t1", "abc123")
     assert r.box == "claude-box-graph-t1-coder-1"
     assert r.log_path == tmp_path / "logs" / "t1" / "01-coder.log"
     assert "a note on stderr" in r.log_path.read_text()
@@ -179,7 +179,7 @@ def test_contract_with_the_real_runner_under_its_fake_engine(tmp_path, monkeypat
         effort="high",
     )
     assert r.exit_code == 0, r.log_path.read_text()
-    assert r.branch == "claude-graph/ct1" and r.base_sha == head
+    assert r.branch == "ct1" and r.base_sha == head
     assert r.worktree is not None
     assert r.worktree.resolve() == (root / ".claude-box-runs" / "ct1").resolve()
     assert r.box == "claude-box-graph-ct1-coder-1"

@@ -96,12 +96,14 @@ def after_reviewer(state: TaskState) -> str:
 # --- nodes -------------------------------------------------------------------------------
 
 
-_SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{0,38}$")
+_SLUG = re.compile(r"^[a-z0-9][a-z0-9-]*(/[a-z0-9][a-z0-9-]*)?$")
 
 
 def _branch_for(slug: str) -> str | None:
-    """`claude-graph/<slug>` when the pm's slug is a sane ref component, else None."""
-    return BRANCH_PREFIX + slug if _SLUG.match(slug) and ".." not in slug else None
+    """The pm's `type/what` name as the branch when it is a sane ref, else None."""
+    if not slug or len(slug) > 60 or ".." in slug or not _SLUG.match(slug):
+        return None
+    return BRANCH_PREFIX + slug
 
 
 def _attempts(state: TaskState, role: str) -> int:
