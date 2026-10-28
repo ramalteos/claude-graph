@@ -169,6 +169,13 @@ valid; a change too large for one review becomes a stack of PRs via `gh stack`. 
 on GitHub, or close it; the graph never merges. With `--no-publish` the deliverable is the
 local branch instead:
 
+**Slack.** With `CLAUDE_GRAPH_SLACK_WEBHOOK` set to a Slack Incoming Webhook URL (made for
+the channel that announces pull requests), the host posts the PR when the reviewer
+approves: the link with the PR title, then the body's `## What` bullets, or the coder's
+summary when there are none. A failed post never changes the verdict; the run summary and
+`status` show `slack: posted` or the error. Runs started from the dashboard inherit the
+variable from the `claude-graph ui` process.
+
 ```sh
 cd <repo>
 git log main..refactor/partnership-product-read
@@ -179,7 +186,9 @@ abox headless . --worktree <task-id> --remove        # drop the worktree; the br
 
 Flags for `run`: `--engine container|docker|fake|auto` (default `container`),
 `--runner <path>`, `--timeout <seconds per box>` (default 3600), `--no-publish`,
-`--publish` (with `--resume`), `--ci-timeout <seconds>` (default 900).
+`--publish` (with `--resume`), `--ci-timeout <seconds>` (default 900). Environment:
+`CLAUDE_GRAPH_SLACK_WEBHOOK` (announce approved PRs), `CLAUDE_GRAPH_STATE`,
+`CLAUDE_GRAPH_RUNNER`.
 
 ### Dashboard (`ui`)
 

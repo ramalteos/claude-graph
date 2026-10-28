@@ -15,9 +15,9 @@ CHANGES = result(report({"verdict": "changes", "notes": "FIX-THIS"}))
 REDESIGN = result(report({"verdict": "redesign", "notes": "WRONG-PLACE"}))
 
 
-def run(scripts, max_iterations=3, settings=None, github=None, publish=False):
+def run(scripts, max_iterations=3, settings=None, github=None, publish=False, slack=None):
     runner = FakeRunner({"pm": [SPEC], **{k: list(v) for k, v in scripts.items()}})
-    graph = build_graph(runner, settings or Settings(), github=github)
+    graph = build_graph(runner, settings or Settings(), github=github, slack=slack)
     final = graph.invoke(
         initial_state(
             task_id="t1", request="REQ", repo="/r", max_iterations=max_iterations, publish=publish
@@ -493,3 +493,67 @@ def test_the_pm_slug_becomes_the_branch_only_when_it_is_a_sane_ref(slug, branch)
     from claude_graph.graph import _branch_for
 
     assert _branch_for(slug) == branch
+
+
+TITLED = result(
+    report(
+        {
+            "summary": "CODED-IT",
+            "pr_title": "feat(x): thing [DPT-0]",
+            "pr_body": "## What\n- did A\n- did B\n## Checklist\n- [x] tests",
+        }
+    )
+)
+
+
+def test_an_approved_pr_is_announced_on_slack():
+    from fake_github import FakeGitHub
+    from fake_slack import FakeSlack
+
+    gh, slack = FakeGitHub(), FakeSlack()
+    final, _ = run(
+        {"architect": [PLAN], "coder": [TITLED], "qa": [QA_PASS], "reviewer": [APPROVE]},
+        github=gh,
+        publish=True,
+        slack=slack,
+    )
+    assert final["status"] == "done" and final["announced"] == "posted"
+    assert slack.posts == [
+        "<https://github.com/o/r/pull/7|feat(x): thing [DPT-0]>\n• did A\n• did B"
+    ]
+    assert gh.calls[-1] == "mark_ready"
+
+
+def test_slack_stays_quiet_without_an_approval_or_a_pr():
+    from fake_github import FakeGitHub
+    from fake_slack import FakeSlack
+
+    slack = FakeSlack()
+    final, _ = run(
+        {"architect": [PLAN], "coder": [TITLED], "qa": [QA_PASS], "reviewer": [CHANGES]},
+        max_iterations=1,
+        github=FakeGitHub(),
+        publish=True,
+        slack=slack,
+    )
+    assert final["status"] == "exhausted" and slack.posts == [] and "announced" not in final
+    final, _ = run(
+        {"architect": [PLAN], "coder": [TITLED], "qa": [QA_PASS], "reviewer": [APPROVE]},
+        slack=slack,
+    )
+    assert final["status"] == "done" and slack.posts == [] and "announced" not in final
+
+
+def test_a_slack_failure_does_not_touch_the_verdict():
+    from fake_github import FakeGitHub
+    from fake_slack import FakeSlack
+
+    gh = FakeGitHub()
+    final, _ = run(
+        {"architect": [PLAN], "coder": [TITLED], "qa": [QA_PASS], "reviewer": [APPROVE]},
+        github=gh,
+        publish=True,
+        slack=FakeSlack(fail=True),
+    )
+    assert final["status"] == "done" and final["announced"] == "failed: slack webhook: HTTP 500"
+    assert "mark_ready" in gh.calls

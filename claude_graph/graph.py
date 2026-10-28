@@ -21,6 +21,7 @@ from claude_graph.reports import (
     parse_report,
 )
 from claude_graph.roles import system_prompt, user_prompt
+from claude_graph.slack import Slack, SlackError, announcement
 from claude_graph.state import StepRecord, TaskState
 
 
@@ -30,8 +31,9 @@ def build_graph(
     checkpointer: Any = None,
     github: GitHub | None = None,
     ci_timeout_s: int = 900,
+    slack: Slack | None = None,
 ) -> CompiledStateGraph:
-    nodes = _Nodes(runner, settings or Settings(), github, ci_timeout_s)
+    nodes = _Nodes(runner, settings or Settings(), github, ci_timeout_s, slack)
     g = StateGraph(TaskState)
     g.add_node("pm", nodes.pm)
     g.add_node("architect", nodes.architect)
@@ -125,11 +127,13 @@ class _Nodes:
         settings: Settings,
         github: GitHub | None = None,
         ci_timeout_s: int = 900,
+        slack: Slack | None = None,
     ) -> None:
         self.runner = runner
         self.settings = settings
         self.github = github
         self.ci_timeout_s = ci_timeout_s
+        self.slack = slack
 
     def _run(self, role: str, state: TaskState) -> tuple[BoxResult, int]:
         attempt = _attempts(state, role) + 1
@@ -271,6 +275,12 @@ class _Nodes:
                     self.github.mark_ready(Path(state["repo"]), state["pr_number"])
                 except PublishError:
                     pass  # the verdict stands; the PR just stays a draft
+            if self.slack is not None and state.get("pr_url"):
+                try:
+                    self.slack.post(announcement(state))
+                    update["announced"] = "posted"
+                except SlackError as e:
+                    update["announced"] = f"failed: {e}"
         elif state["iteration"] >= state["max_iterations"]:
             update["status"] = "exhausted"
         return update

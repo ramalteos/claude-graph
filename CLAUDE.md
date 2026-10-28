@@ -19,8 +19,10 @@ submodule). The orchestrator is Python; the engine side is bash in the sandbox r
 - **Boxes never push; the host does.** After each coder run the `publish` node (host side,
   `git push` + `gh`) pushes the task branch (named `<type>/<what>` by the pm; the task id
   until then), keeps one draft PR, waits for CI;
-  the reviewer reviews that PR. Nothing is ever merged by the graph. `--no-publish` keeps
-  a task local.
+  the reviewer reviews that PR; on `approve` the host marks it ready and, with
+  `CLAUDE_GRAPH_SLACK_WEBHOOK` set, announces it on Slack (`slack.py`; a failed post never
+  changes the verdict). Nothing is ever merged by the graph. `--no-publish` keeps a task
+  local.
 - Docs and commands say "sandbox" / "runner"; the engine-side project name stays in code
   identifiers only.
 

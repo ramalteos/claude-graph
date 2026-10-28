@@ -46,6 +46,7 @@ class TaskState(TypedDict, total=False):
     pr_body: str
     ci_status: str  # pass | fail | none | timeout | error
     ci_summary: str
+    announced: str  # Slack post on approve: "posted" | "failed: <why>"
     spec: str
     acceptance_criteria: list[str]
     plan: str
