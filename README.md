@@ -189,6 +189,7 @@ Data, polled every 3 s from one `/api/state` call:
   each card shows the pipeline strip with the live node, iteration, cost, branch, the PR
   with its CI state, commits ahead of base with a diffstat, QA and review verdicts, the
   next action;
+- **Pull requests** — every task's PR: link, CI state, review verdict, task status;
 - **Activity** — every box run across tasks, newest first; **Logs** — every log file;
 - **Roles and spend** — per role: model, runs, share of reports that parsed, average
   duration, cost; **Engine** — `abox ps`; **Config** — defaults and state dir.

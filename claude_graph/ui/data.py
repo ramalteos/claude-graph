@@ -15,7 +15,7 @@ from claude_graph.config import DEFAULT_EFFORT, DEFAULT_MODELS
 from claude_graph.login import login_verdict
 from claude_graph.roles import ROLE_NAMES
 
-API_VERSION = 1
+API_VERSION = 2  # 2: the prs list
 STALL_AFTER_S = 1200  # a box silent this long is worth a look
 
 
@@ -121,6 +121,7 @@ class Store:
                     "branch": snap.get("branch"),
                     "base_sha": snap.get("base_sha"),
                     "pr_url": snap.get("pr_url"),
+                    "pr_number": snap.get("pr_number"),
                     "ci_status": snap.get("ci_status"),
                     "worktree": snap.get("worktree"),
                     "worktree_present": bool(snap.get("worktree"))
@@ -295,6 +296,7 @@ class Store:
             "login": login_verdict(),
             "state_dir": str(self.state_dir),
             "tasks": tasks,
+            "prs": _pull_requests(tasks),
             "boxes": self.boxes(loaded),
             "attention": self.attention(tasks),
             "timeline": self.timeline(loaded=loaded),
@@ -330,6 +332,12 @@ class Store:
             return [ln for ln in proc.stdout.splitlines() if ln.strip()]
         except (OSError, subprocess.TimeoutExpired) as e:
             return [f"{self.runner_name} ps failed: {e}"]
+
+
+def _pull_requests(tasks: list[dict]) -> list[dict]:
+    """One row per task with a PR, in the tasks' order (newest first)."""
+    keys = ("task_id", "pr_url", "pr_number", "ci_status", "review_verdict", "status", "updated_at")
+    return [{k: t.get(k) for k in keys} for t in tasks if t.get("pr_url")]
 
 
 def _loaded(store: Store, loaded: dict[str, Loaded] | None) -> dict[str, Loaded]:

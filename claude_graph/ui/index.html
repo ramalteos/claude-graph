@@ -134,6 +134,10 @@ form.new textarea { min-height: 90px; }
   </details>
   <div class="cols">
     <div>
+      <details class="sec" id="sec-prs" open>
+        <summary>Pull requests <span class="dim" id="prscount"></span></summary>
+        <div class="scroll" id="prs"></div>
+      </details>
       <details class="sec" id="sec-activity" open>
         <summary>Activity <span class="dim" id="timelinecount"></span></summary>
         <div class="scroll" id="timeline"></div>
@@ -171,7 +175,7 @@ form.new textarea { min-height: 90px; }
   <pre id="body"></pre>
 </div>
 <script>
-const API_EXPECTED = 1;
+const API_EXPECTED = 2;
 const ACTION_TOKEN = "__ACTION_TOKEN__";
 const ACTIONS_ON = ACTION_TOKEN.length > 0;
 const ROLES = ["pm", "architect", "coder", "qa", "reviewer"];
@@ -233,6 +237,12 @@ function render(s) {
   for (const t of s.tasks) (byCol[t.status] || (byCol[t.status] = [])).push(t);
   setHTML("board", Object.entries(byCol).map(([col, items]) => `
     <div class="col"><h3><span>${esc(col)}</span><span>${items.length}</span></h3>${items.map(taskCard).join("") || `<div class="dim" style="font-size:12px">—</div>`}</div>`).join(""));
+
+  // pull requests
+  const prs = s.prs || [];
+  $("prscount").textContent = prs.length || "";
+  setHTML("prs", prs.length ? `<table><thead><tr><th>task</th><th>PR</th><th>CI</th><th>review</th><th>status</th><th>updated</th></tr></thead><tbody>${prs.map(p => `
+    <tr class="click" data-open="task" data-task="${esc(p.task_id)}"><td><span class="tid">${esc(p.task_id)}</span></td><td><a href="${esc(p.pr_url)}" target="_blank" rel="noopener">#${esc(p.pr_number ?? "")}</a></td><td class="${p.ci_status === "fail" ? "bad" : p.ci_status === "pass" ? "ok" : "dim"}">${esc(p.ci_status || "")}</td><td>${esc(p.review_verdict || "")}</td><td>${esc(p.status)}</td><td class="dim">${esc(ago(p.updated_at))}</td></tr>`).join("")}</tbody></table>` : `<div class="empty">no pull requests yet: a PR appears after a task's first coder run (not with --no-publish)</div>`);
 
   // activity
   $("timelinecount").textContent = s.timeline.length || "";

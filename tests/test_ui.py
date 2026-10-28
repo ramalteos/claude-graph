@@ -724,3 +724,52 @@ def test_task_views_carry_the_pull_request_and_ci(world):
     assert task["pr_url"].endswith("/pull/7") and task["ci_status"] == "pass"
     doc = store.document("t1")
     assert doc["pr_url"].endswith("/pull/7") and doc["ci_summary"] == "unit: pass"
+
+
+def test_state_lists_pull_requests_newest_first(world):
+    from claude_graph.ui.data import Store
+
+    state, _ = world
+    snap = json.loads((state / "tasks" / "t1.json").read_text())
+    snap.update(
+        pr_url="https://github.com/o/r/pull/7",
+        pr_number=7,
+        ci_status="fail",
+        review_verdict="changes",
+    )
+    (state / "tasks" / "t1.json").write_text(json.dumps(snap))
+    (state / "tasks" / "t2.json").write_text(
+        json.dumps(
+            {
+                "task_id": "t2",
+                "status": "done",
+                "steps": [],
+                "updated_at": "2026-10-28T10:00:00+00:00",
+            }
+        )
+    )
+    (state / "tasks" / "t3.json").write_text(
+        json.dumps(
+            {
+                "task_id": "t3",
+                "status": "done",
+                "steps": [],
+                "updated_at": "2026-10-28T11:00:00+00:00",
+                "pr_url": "https://github.com/o/r/pull/9",
+                "pr_number": 9,
+                "ci_status": "pass",
+                "review_verdict": "approve",
+            }
+        )
+    )
+    prs = Store(state, None, "fake").state()["prs"]
+    assert [p["task_id"] for p in prs] == ["t3", "t1"]  # t2 has no PR
+    assert prs[0] == {
+        "task_id": "t3",
+        "pr_url": "https://github.com/o/r/pull/9",
+        "pr_number": 9,
+        "ci_status": "pass",
+        "review_verdict": "approve",
+        "status": "done",
+        "updated_at": "2026-10-28T11:00:00+00:00",
+    }
