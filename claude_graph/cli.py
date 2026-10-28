@@ -6,6 +6,7 @@ import argparse
 import json
 import os
 import signal
+import subprocess
 import sys
 import threading
 import time
@@ -18,6 +19,7 @@ from langgraph.graph import START
 
 from claude_graph.boxes import ClaudeBoxRunner
 from claude_graph.config import DEFAULT_ENGINE, find_claude_box, load_settings, state_dir
+from claude_graph.github import GhGitHub
 from claude_graph.graph import build_graph
 from claude_graph.state import DEFAULT_MAX_ITERATIONS, TASK_ID, TaskState, initial_state
 from claude_graph.ui.server import UiContext, serve
@@ -66,6 +68,14 @@ def parser() -> argparse.ArgumentParser:
         help="path to the box runner (abox); default: abox or claude-box on PATH",
     )
     run.add_argument("--timeout", type=int, default=3600, help="seconds per box")
+    run.add_argument(
+        "--no-publish",
+        action="store_true",
+        help="no push, no pull request, no CI: QA runs everything locally",
+    )
+    run.add_argument(
+        "--ci-timeout", type=int, default=900, help="seconds to wait for the PR's checks"
+    )
     run.set_defaults(func=cmd_run)
 
     status = sub.add_parser("status", help="final/last state of a task")
@@ -146,11 +156,23 @@ def cmd_run(args: argparse.Namespace) -> int:
     )
     config = {"configurable": {"thread_id": task_id}}
     with SqliteSaver.from_conn_string(str(root / "checkpoints.sqlite")) as saver:
-        graph = build_graph(runner, load_settings(repo), checkpointer=saver)
+        probe = build_graph(runner, load_settings(repo), checkpointer=saver)
         if args.resume:
-            snapshot = graph.get_state(config)
+            snapshot = probe.get_state(config)
             if not snapshot.values:
                 raise CliError(f"no such task: {task_id}")
+            publish = bool(snapshot.values.get("publish")) and not args.no_publish
+        else:
+            publish = not args.no_publish
+        graph = build_graph(
+            runner,
+            load_settings(repo),
+            checkpointer=saver,
+            github=GhGitHub() if publish else None,
+            ci_timeout_s=args.ci_timeout,
+        )
+        if args.resume:
+            snapshot = graph.get_state(config)
             if snapshot.values["status"] == "done":
                 print(summary(snapshot.values))
                 return 0
@@ -174,6 +196,8 @@ def cmd_run(args: argparse.Namespace) -> int:
                 request=request,
                 repo=str(repo),
                 max_iterations=args.max_iterations or DEFAULT_MAX_ITERATIONS,
+                publish=publish,
+                base_branch=_current_branch(repo),
             )
             print(f"task {task_id} on {repo} (engine {args.engine})", file=sys.stderr)
         try:
@@ -183,6 +207,17 @@ def cmd_run(args: argparse.Namespace) -> int:
             return 130
     print(summary(final))
     return 0 if final["status"] == "done" else 1
+
+
+def _current_branch(repo: Path) -> str:
+    """The checked-out branch, which the pull request targets; `main` when detached."""
+    proc = subprocess.run(
+        ["git", "-C", str(repo), "symbolic-ref", "--short", "-q", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return proc.stdout.strip() or "main"
 
 
 def _last_node(values: TaskState) -> str:
@@ -324,6 +359,8 @@ def summary(state: TaskState) -> str:
         f"task {state['task_id']}: {state['status']}",
         f"  branch:     {state.get('branch', '-')}",
         f"  base:       {state.get('base_sha', '-')}",
+        *([f"  pr:         {state['pr_url']}"] if state.get("pr_url") else []),
+        *([f"  ci:         {state['ci_status']}"] if state.get("ci_status") else []),
         f"  iterations: {state.get('iteration', 0)}/{state.get('max_iterations', '?')}",
         f"  boxes:      {len(steps)}  (${cost:.2f})",
     ]

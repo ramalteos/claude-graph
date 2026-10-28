@@ -25,7 +25,32 @@ def env(tmp_path, monkeypatch):
     )
     repo = tmp_path / "repo"
     repo.mkdir()
-    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    subprocess.run(["git", "init", "-q", "-b", "main", str(repo)], check=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repo),
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "init",
+        ],
+        check=True,
+    )
+    bare = tmp_path / "origin.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(bare)], check=True)
+    subprocess.run(["git", "-C", str(repo), "remote", "add", "origin", str(bare)], check=True)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "gh").symlink_to(Path(__file__).parent / "fake_gh.sh")
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.setenv("FAKE_GH_STATE", str(tmp_path / "ghstate"))
     return tmp_path, repo
 
 
@@ -399,3 +424,26 @@ def test_max_iterations_outside_1_to_20_is_a_usage_error(capsys, bad):
     with pytest.raises(SystemExit) as e:
         parser().parse_args(["run", "x", "--max-iterations", bad])
     assert e.value.code == 2 and "max-iterations" in capsys.readouterr().err
+
+
+def test_a_run_opens_a_draft_pr_against_the_checked_out_branch(env, capsys):
+    tmp, repo = env
+    rc = run_cli("run", repo, "x", "--task-id", "t1", "--engine", "fake", "--runner", FAKE)
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "pr:         https://github.com/o/r/pull/7" in out and "ci:         none" in out
+    log = (tmp / "ghstate" / "argv.log").read_text()
+    assert "pr create --draft --head claude-graph/t1 --base main" in log
+    assert "pr ready 7" in log
+    snap = json.loads((tmp / "state" / "tasks" / "t1.json").read_text())
+    assert snap["base_branch"] == "main" and snap["publish"] is True
+
+
+def test_no_publish_keeps_github_out_of_it(env, capsys):
+    tmp, repo = env
+    rc = run_cli(
+        "run", repo, "x", "--task-id", "t1", "--no-publish", "--engine", "fake", "--runner", FAKE
+    )
+    assert rc == 0
+    assert not (tmp / "ghstate" / "argv.log").exists()
+    assert "pr:" not in capsys.readouterr().out

@@ -16,6 +16,8 @@ for a in "$@"; do
   prev="$a"
 done
 [ "$remove" = 1 ] && exit 0
+# the real runner cuts the branch at HEAD; a push-based test needs it to exist
+[ -n "$wt" ] && [ -d "${2:-}" ] && git -C "$2" branch "${branch:-claude-box/$wt}" >/dev/null 2>&1
 [ -n "$wt" ] && printf 'worktree=/tmp/wt/%s\nbranch=%s\nbase=abc123\n' "$wt" "${branch:-claude-box/$wt}"
 printf 'box=claude-box-%s\n' "$name"
 case "$name" in *-"${FAKE_FAIL_ROLE:-__none__}"-*) exit 1 ;; esac   # one role fails, the rest work

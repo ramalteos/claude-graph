@@ -27,3 +27,10 @@ def test_abox_beats_claude_box_on_path(tmp_path, monkeypatch):
     assert find_claude_box() == apple
     apple.unlink()
     assert find_claude_box() == plain
+
+
+def test_every_role_defaults_to_opus():
+    from claude_graph.config import Settings
+    from claude_graph.roles import ROLE_NAMES
+
+    assert {Settings().model(r) for r in ROLE_NAMES} == {"opus"}

@@ -1,4 +1,4 @@
-"""The graph: pm → architect → coder → qa → reviewer, with bounded loops back on failure."""
+"""The graph: pm → architect → coder → publish → qa → reviewer, with bounded loops back."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ from langgraph.graph.state import CompiledStateGraph
 
 from claude_graph.boxes import BoxResult, BoxRunner
 from claude_graph.config import Settings
+from claude_graph.github import GitHub, PublishError
 from claude_graph.reports import (
     ArchitectReport,
     CoderReport,
@@ -23,9 +24,13 @@ from claude_graph.state import StepRecord, TaskState
 
 
 def build_graph(
-    runner: BoxRunner, settings: Settings | None = None, checkpointer: Any = None
+    runner: BoxRunner,
+    settings: Settings | None = None,
+    checkpointer: Any = None,
+    github: GitHub | None = None,
+    ci_timeout_s: int = 900,
 ) -> CompiledStateGraph:
-    nodes = _Nodes(runner, settings or Settings())
+    nodes = _Nodes(runner, settings or Settings(), github, ci_timeout_s)
     g = StateGraph(TaskState)
     g.add_node("pm", nodes.pm)
     g.add_node("architect", nodes.architect)
@@ -35,7 +40,14 @@ def build_graph(
     g.add_edge(START, "pm")
     g.add_conditional_edges("pm", after_pm, {"architect": "architect", END: END})
     g.add_conditional_edges("architect", after_architect, {"coder": "coder", END: END})
-    g.add_conditional_edges("coder", after_coder, {"qa": "qa", END: END})
+    if github is not None:
+        g.add_node("publish", nodes.publish)
+        g.add_conditional_edges(
+            "coder", after_coder_with_publish, {"publish": "publish", "qa": "qa", END: END}
+        )
+        g.add_conditional_edges("publish", after_publish, {"qa": "qa", END: END})
+    else:
+        g.add_conditional_edges("coder", after_coder, {"qa": "qa", END: END})
     g.add_conditional_edges("qa", after_qa, {"reviewer": "reviewer", "coder": "coder", END: END})
     g.add_conditional_edges(
         "reviewer", after_reviewer, {"coder": "coder", "architect": "architect", END: END}
@@ -55,6 +67,16 @@ def after_architect(state: TaskState) -> str:
 
 
 def after_coder(state: TaskState) -> str:
+    return END if state["status"] == "failed" else "qa"
+
+
+def after_coder_with_publish(state: TaskState) -> str:
+    if state["status"] == "failed":
+        return END
+    return "publish" if state.get("publish") else "qa"
+
+
+def after_publish(state: TaskState) -> str:
     return END if state["status"] == "failed" else "qa"
 
 
@@ -86,9 +108,17 @@ def _tail(text: str | None, limit: int = 2000) -> str:
 
 
 class _Nodes:
-    def __init__(self, runner: BoxRunner, settings: Settings) -> None:
+    def __init__(
+        self,
+        runner: BoxRunner,
+        settings: Settings,
+        github: GitHub | None = None,
+        ci_timeout_s: int = 900,
+    ) -> None:
         self.runner = runner
         self.settings = settings
+        self.github = github
+        self.ci_timeout_s = ci_timeout_s
 
     def _run(self, role: str, state: TaskState) -> tuple[BoxResult, int]:
         attempt = _attempts(state, role) + 1
@@ -165,6 +195,27 @@ class _Nodes:
             update["coder_summary"] = _tail(res.result_text)
         return update
 
+    def publish(self, state: TaskState) -> TaskState:
+        """Host side, no box: push the branch, keep one draft PR, wait for its checks."""
+        assert self.github is not None
+        repo, branch = Path(state["repo"]), state["branch"]
+        title = state["request"].strip().splitlines()[0][:70]
+        body = (
+            f"Task `{state['task_id']}`, opened by claude-graph; reviewed on this pull request, "
+            f"never merged by it.\n\n{state.get('spec', '')[:3000]}"
+        )
+        try:
+            self.github.push(repo, branch)
+            pr = self.github.ensure_pr(
+                repo, branch, state.get("base_branch") or "main", title, body
+            )
+            checks = self.github.wait_checks(repo, pr.number, self.ci_timeout_s)
+        except PublishError as e:
+            return TaskState(status="failed", ci_status="error", ci_summary=str(e))
+        return TaskState(
+            pr_url=pr.url, pr_number=pr.number, ci_status=checks.status, ci_summary=checks.summary
+        )
+
     def qa(self, state: TaskState) -> TaskState:
         res, attempt = self._run("qa", state)
         # A verdict from a box that failed (stopped, timed out) is no verdict.
@@ -196,6 +247,11 @@ class _Nodes:
             )
         if update["review_verdict"] == "approve":
             update["status"] = "done"
+            if self.github is not None and state.get("pr_number"):
+                try:
+                    self.github.mark_ready(Path(state["repo"]), state["pr_number"])
+                except PublishError:
+                    pass  # the verdict stands; the PR just stays a draft
         elif state["iteration"] >= state["max_iterations"]:
             update["status"] = "exhausted"
         return update

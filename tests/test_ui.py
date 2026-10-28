@@ -257,7 +257,7 @@ def test_state_has_every_section(ui, alive):
     assert stats["pm"]["runs"] == 1 and stats["pm"]["avg_s"] == 30 and stats["qa"]["runs"] == 0
     assert s["spend"]["total"] == 0.1
     assert s["logs"][0]["name"] == "01-qa.log"
-    assert s["config"]["models"]["pm"] == "fable" and s["config"]["roles"][0] == "pm"
+    assert s["config"]["models"]["pm"] == "opus" and s["config"]["roles"][0] == "pm"
 
 
 def test_dead_orchestrator_shows_as_stopped_with_resume_hint(ui):
@@ -705,3 +705,22 @@ def test_a_non_ascii_token_header_is_a_json_403_not_a_crash(ui_actions):
         assert e.code == 403 and json.loads(e.read())["output"] == "bad token"
     else:
         raise AssertionError("a bad token was accepted")
+
+
+def test_task_views_carry_the_pull_request_and_ci(world):
+    from claude_graph.ui.data import Store
+
+    state, _ = world
+    snap = json.loads((state / "tasks" / "t1.json").read_text())
+    snap.update(
+        pr_url="https://github.com/o/r/pull/7",
+        pr_number=7,
+        ci_status="pass",
+        ci_summary="unit: pass",
+    )
+    (state / "tasks" / "t1.json").write_text(json.dumps(snap))
+    store = Store(state, None, "fake")
+    task = store.tasks()[0]
+    assert task["pr_url"].endswith("/pull/7") and task["ci_status"] == "pass"
+    doc = store.document("t1")
+    assert doc["pr_url"].endswith("/pull/7") and doc["ci_summary"] == "unit: pass"

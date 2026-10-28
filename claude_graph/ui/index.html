@@ -268,6 +268,7 @@ function taskCard(t) {
     `<span class="chip">iter ${esc(t.iteration)}/${esc(t.max_iterations ?? "?")}</span>`,
     `<span class="chip">${money(t.cost)}</span>`,
     t.branch ? `<span class="chip mono">${esc(t.branch)}</span>` : "",
+    t.pr_url ? `<a class="chip ${t.ci_status === "fail" ? "bad" : t.ci_status === "pass" ? "ok" : ""}" href="${esc(t.pr_url)}" target="_blank" rel="noopener">PR${t.ci_status ? " · ci " + esc(t.ci_status) : ""}</a>` : "",
     p && p.branch_exists ? `<span class="chip ${p.commits ? "ok" : ""}">+${esc(p.commits)} commit${p.commits === 1 ? "" : "s"}${p.shortstat ? " · " + esc(p.shortstat.replace(/ files? changed/, "f").replace(/ insertions?\(\+\)/, "+").replace(/ deletions?\(-\)/, "-")) : ""}</span>` : "",
     t.qa_passed === false ? `<span class="chip bad">qa failed</span>` : t.qa_passed ? `<span class="chip ok">qa ok</span>` : "",
     t.review_verdict ? `<span class="chip ${t.review_verdict === "approve" ? "ok" : "warn"}">${esc(t.review_verdict)}</span>` : "",
@@ -339,6 +340,8 @@ async function showTask(task) {
     ${d.acceptance_criteria && d.acceptance_criteria.length ? `<h2>Acceptance criteria</h2><ol>${d.acceptance_criteria.map(c => `<li>${esc(c)}</li>`).join("")}</ol>` : ""}
     ${sec("Plan (architect)", d.plan)}
     ${sec("Coder summary", d.coder_summary)}
+    ${d.pr_url ? `<h2>Pull request</h2><p><a href="${esc(d.pr_url)}" target="_blank" rel="noopener">${esc(d.pr_url)}</a>${d.ci_status ? " · CI " + esc(d.ci_status) : ""}</p>` : ""}
+    ${sec("CI checks", d.ci_summary)}
     ${sec("QA report" + (d.qa_passed == null ? "" : d.qa_passed ? " — passed" : " — FAILED"), d.qa_report)}
     ${sec("Review" + (d.review_verdict ? " — " + d.review_verdict : ""), d.review_notes)}
     <h2>Steps</h2><table><thead><tr><th>#</th><th>role</th><th>box</th><th>exit</th><th>took</th><th>cost</th><th>report</th></tr></thead><tbody>${(d.steps || []).map((s, i) => `<tr class="click" data-open="log" data-task="${esc(task)}" data-name="${String(s.attempt).padStart(2, "0")}-${esc(s.role)}.log"><td>${i + 1}</td><td><span class="badge ${esc(s.role)}">${esc(s.role)}</span></td><td class="mono dim">${esc(s.box || "")}</td><td>${esc(s.exit_code)}</td><td class="mono">${dur(s.duration_s)}</td><td class="mono">${s.cost_usd != null ? "$" + s.cost_usd.toFixed(3) : ""}</td><td>${s.parsed_ok ? "ok" : "none"}</td></tr>`).join("")}</tbody></table>`;

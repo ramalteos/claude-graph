@@ -2,20 +2,27 @@
 
 A LangGraph harness for coding tasks. One request goes through five role agents —
 **pm → architect → coder → qa → reviewer** — with bounded loops back on failure, and
-comes out as a reviewed branch. The product manager writes the spec and acceptance
-criteria first; every later role works against them. Every agent is a headless Claude
-Code session running inside a sandbox, launched with Apple `container` by `abox`, the
-runner from the [sandbox repo](https://github.com/raj-mehra/claude-box), vendored here as the
-`sandbox/` git submodule.
+comes out as a reviewed draft pull request. The product manager writes the spec and
+acceptance criteria first; every later role works against them. Every agent is a headless
+Claude Code session running inside a sandbox, launched with Apple `container` by `abox`,
+the runner from the [sandbox repo](https://github.com/ramalteos/claude-box), vendored
+here as the `sandbox/` git submodule.
 
 ```
-START → pm → architect → coder → qa ──pass──→ reviewer ──approve──→ END  (done)
-                          ▲        │ fail           │ changes
-                          └────────┘                │
-                          └─────────────────────────┘
-               architect ◄──────────────────────────┘ redesign
+START → pm → architect → coder → publish → qa ──pass──→ reviewer ──approve──→ END  (done)
+                          ▲                  │ fail           │ changes
+                          └──────────────────┘                │
+                          └───────────────────────────────────┘
+               architect ◄────────────────────────────────────┘ redesign
                any loop past --max-iterations → END  (exhausted)
 ```
+
+`publish` runs on the host, not in a box: it pushes the task branch, opens one draft pull
+request on `origin` (the first time), and waits for the PR's checks. QA then runs the unit
+tests locally and takes integration, end-to-end and build results from CI; the reviewer
+reviews the pull request on GitHub and posts its findings there; on `approve` the PR is
+marked ready for review. Nothing is ever merged by the graph. `--no-publish` keeps a task
+local: no push, no PR, QA runs everything itself.
 
 No Anthropic API key is involved: the boxes use the Claude Code login that the sandbox
 already keeps. The orchestrator never talks to the container engine itself.
@@ -81,8 +88,10 @@ Repos anywhere on disk work. Those under `CLAUDE_BOX_ROOT` (default `~/Documents
 are mounted with their siblings at the same path inside the box; a repo elsewhere is
 mounted alone, and its task worktrees land in `<repo>/.claude-box-runs/` (git-excluded).
 
-Optional: `gh auth login` on the host. `abox` forwards the existing `gh` token into boxes;
-the roles here never push, so it only matters if your repo's tests need GitHub.
+`gh auth login` on the host, with an account that can push to the target repo and open
+pull requests on it. The host uses it to push and to open the PR; `abox` forwards the same
+token into boxes, where QA reads CI logs and the reviewer posts its review. Only
+`--no-publish` tasks work without it.
 
 ## What persists after setup
 
@@ -121,11 +130,13 @@ as a path (`./x`, `../x`, `/x`) to a directory; a bare word that merely matches 
 folder name is part of the request.
 
 What happens: a worktree on branch `claude-graph/<task-id>` is cut from the repo's HEAD
-inside a box; then one box per role
-runs in it — pm, architect, coder, qa, reviewer — looping back on a QA fail or a
-reviewer's `changes` (to the coder) or `redesign` (to the architect), at most
-`--max-iterations` coder runs (default 3). The terminal prints a summary at the end;
-the dashboard shows every step and its live log while it runs.
+inside a box; then one box per role runs in it — pm, architect, coder, qa, reviewer —
+looping back on a QA fail or a reviewer's `changes` (to the coder) or `redesign` (to the
+architect), at most `--max-iterations` coder runs (default 3). After every coder run the
+host pushes the branch, opens the draft PR against the branch that was checked out when
+the task started (once), and waits up to `--ci-timeout` seconds (default 900) for the PR's
+checks; the result goes into QA's and the reviewer's briefs. The terminal prints a summary
+at the end; the dashboard shows every step, its live log, the PR and its CI state.
 
 ```sh
 claude-graph run <repo> "<request>" --task-id health-route --max-iterations 2
@@ -143,8 +154,10 @@ SIGTERM or a hangup from a closed terminal (the box is stopped and its record cl
 
 ## Take the result
 
-Nothing is pushed or merged. The deliverable is the branch `claude-graph/<task-id>` in
-your repo:
+The deliverable is the pull request from `claude-graph/<task-id>`, a draft until the
+reviewer approves, with the reviewer's findings as a review comment and CI run on it.
+Merge it on GitHub, or close it; the graph never merges. With `--no-publish` the
+deliverable is the local branch instead:
 
 ```sh
 cd <repo>
@@ -155,7 +168,8 @@ abox headless . --worktree health-route --remove          # drop the worktree; t
 ```
 
 Flags for `run`: `--engine container|docker|fake|auto` (default `container`),
-`--runner <path>`, `--timeout <seconds per box>` (default 3600).
+`--runner <path>`, `--timeout <seconds per box>` (default 3600), `--no-publish`,
+`--ci-timeout <seconds>` (default 900).
 
 ### Dashboard (`ui`)
 
@@ -172,8 +186,9 @@ Data, polled every 3 s from one `/api/state` call:
 - **Needs you** — expired login, failed / exhausted / stopped tasks (orchestrator died
   mid-run), boxes silent for over 20 minutes;
 - **Tasks** — a board by status (`running`, `stopped`, `failed`, `exhausted`, `done`);
-  each card shows the pipeline strip with the live node, iteration, cost, branch,
-  commits ahead of base with a diffstat, QA and review verdicts, the next action;
+  each card shows the pipeline strip with the live node, iteration, cost, branch, the PR
+  with its CI state, commits ahead of base with a diffstat, QA and review verdicts, the
+  next action;
 - **Activity** — every box run across tasks, newest first; **Logs** — every log file;
 - **Roles and spend** — per role: model, runs, share of reports that parsed, average
   duration, cost; **Engine** — `abox ps`; **Config** — defaults and state dir.
@@ -208,8 +223,8 @@ coder = "sonnet"      # override per role
 qa = "low"            # default for every role: high
 ```
 
-Defaults: `pm` and `architect` on `fable`, `coder`, `qa` and `reviewer` on `opus`,
-all at effort `high`. Values are Claude Code `--model` / `--effort` arguments.
+Defaults: every role on `opus` at effort `high`. Values are Claude Code `--model` /
+`--effort` arguments.
 
 ## How a step works
 
@@ -223,6 +238,9 @@ all at effort `high`. Values are Claude Code `--model` / `--effort` arguments.
    `result` event's text is the role's answer; its last fenced `json` block is the report.
 4. The node parses the report and updates state. Unparseable reports take the conservative
    value: QA → fail, reviewer → changes, architect → raw text as the plan.
+5. After the coder, `publish` (host side, `git push` and `gh`) pushes the branch, keeps one
+   draft PR per task, and records the PR's checks as `ci_status` (`pass`, `fail`, `none`,
+   `timeout`) plus a per-check summary that QA and the reviewer read.
 
 Report contract:
 
@@ -268,3 +286,9 @@ without the submodule).
   number, not the same name.
 - **`sandbox runner … is too old`**: the runner found first (see the lookup order above)
   predates the `headless` command. Pull it, or pass `--runner sandbox/abox`.
+- **Task fails right after the coder with `ci: error`**: the push or `gh pr create` failed;
+  the summary holds git's or gh's message. Usual causes: no `origin`, no push rights, `gh`
+  not logged in. `--no-publish` runs the task without GitHub.
+- **The reviewer could not approve on GitHub**: expected. The forwarded token is the PR
+  author's, and GitHub refuses approving your own PR, so the review is a comment and the
+  verdict lives in the graph.

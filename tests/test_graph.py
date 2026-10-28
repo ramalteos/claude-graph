@@ -14,13 +14,19 @@ CHANGES = result(report({"verdict": "changes", "notes": "FIX-THIS"}))
 REDESIGN = result(report({"verdict": "redesign", "notes": "WRONG-PLACE"}))
 
 
-def run(scripts, max_iterations=3, settings=None):
+def run(scripts, max_iterations=3, settings=None, github=None, publish=False):
     runner = FakeRunner({"pm": [SPEC], **{k: list(v) for k, v in scripts.items()}})
-    graph = build_graph(runner, settings or Settings())
+    graph = build_graph(runner, settings or Settings(), github=github)
     final = graph.invoke(
-        initial_state(task_id="t1", request="REQ", repo="/r", max_iterations=max_iterations)
+        initial_state(
+            task_id="t1", request="REQ", repo="/r", max_iterations=max_iterations, publish=publish
+        )
     )
     return final, runner
+
+
+def prompt_for(runner, role, nth=0):
+    return [c["prompt"] for c in runner.calls if c["role"] == role][nth]
 
 
 def test_happy_path():
@@ -58,8 +64,8 @@ def test_models_and_efforts_come_from_settings():
 def test_default_models_per_role():
     _, runner = run({"architect": [PLAN], "coder": [CODED], "qa": [QA_PASS], "reviewer": [APPROVE]})
     assert {c["role"]: c["model"] for c in runner.calls} == {
-        "pm": "fable",
-        "architect": "fable",
+        "pm": "opus",
+        "architect": "opus",
         "coder": "opus",
         "qa": "opus",
         "reviewer": "opus",
@@ -298,3 +304,73 @@ def test_a_failed_coder_box_fails_the_task_instead_of_running_qa():
     assert final["status"] == "failed"
     assert runner.roles() == ["pm", "architect", "coder"]
     assert "exit 127" in final["coder_summary"]
+
+
+def test_publish_pushes_opens_a_draft_pr_and_hands_ci_to_qa():
+    from fake_github import FakeGitHub
+
+    gh = FakeGitHub(checks=("pass", "build: pass https://ci/1"))
+    final, runner = run(
+        {"architect": [PLAN], "coder": [CODED], "qa": [QA_PASS], "reviewer": [APPROVE]},
+        github=gh,
+        publish=True,
+    )
+    assert final["status"] == "done"
+    assert gh.calls == ["push", "ensure_pr", "wait_checks", "mark_ready"]
+    assert final["pr_url"].endswith("/pull/7") and final["pr_number"] == 7
+    assert final["ci_status"] == "pass" and "build: pass" in final["ci_summary"]
+    assert "https://ci/1" in prompt_for(runner, "qa") and "pull/7" in prompt_for(runner, "qa")
+    assert "gh pr diff 7" in prompt_for(runner, "reviewer")
+
+
+def test_a_coder_loop_pushes_again_but_keeps_one_pr():
+    from fake_github import FakeGitHub
+
+    gh = FakeGitHub()
+    final, runner = run(
+        {
+            "architect": [PLAN],
+            "coder": [CODED, CODED],
+            "qa": [QA_FAIL, QA_PASS],
+            "reviewer": [APPROVE],
+        },
+        github=gh,
+        publish=True,
+    )
+    assert final["status"] == "done" and final["pr_number"] == 7
+    assert gh.calls.count("push") == 2 and gh.calls.count("mark_ready") == 1
+    assert runner.roles() == ["pm", "architect", "coder", "qa", "coder", "qa", "reviewer"]
+
+
+def test_a_failed_ci_reaches_qa_and_a_changes_verdict_does_not_mark_ready():
+    from fake_github import FakeGitHub
+
+    gh = FakeGitHub(checks=("fail", "e2e: fail https://ci/9"))
+    final, runner = run(
+        {"architect": [PLAN], "coder": [CODED], "qa": [QA_FAIL], "reviewer": [CHANGES]},
+        max_iterations=1,
+        github=gh,
+        publish=True,
+    )
+    assert final["status"] == "exhausted"
+    assert "e2e: fail" in prompt_for(runner, "qa") and "mark_ready" not in gh.calls
+
+
+def test_a_push_failure_fails_the_task_before_qa():
+    from fake_github import FakeGitHub
+
+    gh = FakeGitHub(fail_push=True)
+    final, runner = run({"architect": [PLAN], "coder": [CODED]}, github=gh, publish=True)
+    assert final["status"] == "failed" and "push rejected" in final["ci_summary"]
+    assert runner.roles() == ["pm", "architect", "coder"]
+
+
+def test_without_publish_the_flow_stays_local():
+    from fake_github import FakeGitHub
+
+    gh = FakeGitHub()
+    final, runner = run(
+        {"architect": [PLAN], "coder": [CODED], "qa": [QA_PASS], "reviewer": [APPROVE]}, github=gh
+    )
+    assert final["status"] == "done" and gh.calls == [] and "pr_url" not in final
+    assert "full test suite" in prompt_for(runner, "qa").lower()

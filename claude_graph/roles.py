@@ -46,11 +46,51 @@ def user_prompt(role: str, state: TaskState) -> str:
     if role == "coder":
         _section(parts, "Previous QA report", state.get("qa_report"))
         _section(parts, "Previous review notes", state.get("review_notes"))
+        if state.get("publish"):
+            _section(parts, "Pull request", _coder_pr(state))
     if role in ("qa", "reviewer"):
         _section(parts, "What the coder says it did", state.get("coder_summary"))
+    if role == "qa":
+        _section(parts, "Pull request and CI", _qa_ci(state))
     if role == "reviewer":
         _section(parts, "QA report", state.get("qa_report"))
+        _section(parts, "Pull request", _reviewer_pr(state))
     return "\n".join(parts)
+
+
+def _coder_pr(state: TaskState) -> str:
+    where = f"PR {state['pr_url']}" if state.get("pr_url") else "a draft pull request"
+    return (
+        f"After each of your runs the orchestrator pushes this branch, keeps {where} current "
+        "and waits for its CI. Do not push."
+    )
+
+
+def _qa_ci(state: TaskState) -> str:
+    if not state.get("pr_url"):
+        return "No pull request for this task: run the full test suite and the linter locally."
+    return (
+        f"PR {state['pr_url']} (#{state['pr_number']}). CI result: {state.get('ci_status')}.\n"
+        f"{state.get('ci_summary') or ''}\n\n"
+        "Run the unit tests and the linter locally. Integration, end-to-end and build checks "
+        "are verified by CI: judge them from the results above, and open a failing check's "
+        "log with `gh run view <run-id> --log-failed` when its link names a run. A failed "
+        "check is a fail, with the check named. When CI reported no checks, run the full "
+        "test suite locally instead."
+    )
+
+
+def _reviewer_pr(state: TaskState) -> str | None:
+    if not state.get("pr_url"):
+        return None
+    n = state["pr_number"]
+    return (
+        f"Review PR {state['pr_url']} on GitHub: `gh pr view {n}`, `gh pr diff {n}`. "
+        f"CI result: {state.get('ci_status')}.\n{state.get('ci_summary') or ''}\n\n"
+        f"Post your findings as a review on the pull request: write them to a file, then "
+        f"`gh pr review {n} --comment --body-file <file>` (the token is the PR author's, so "
+        "GitHub allows a comment review only). Your verdict goes in the JSON block."
+    )
 
 
 def _numbered(items: list[str] | None) -> str | None:

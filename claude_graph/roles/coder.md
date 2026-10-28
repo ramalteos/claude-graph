@@ -12,6 +12,8 @@ contradicts it, follow the code and say so in your report.
   unit, nothing duplicated a third time, nothing speculative, inputs parsed at the edge,
   no string-built commands or queries, no secrets, output escaped.
 - Leave a clean tree: everything committed, nothing untracked that should be tracked.
+- Never push. When the task has a pull request, the orchestrator pushes after your run and
+  CI runs there; your brief says so.
 
 ## Report
 

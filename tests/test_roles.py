@@ -85,3 +85,32 @@ def test_qa_and_reviewer_see_the_coder_summary():
     assert "CODER-SAID" in user_prompt("reviewer", s)
     assert "QA-SAID" in user_prompt("reviewer", s)
     assert "QA-SAID" not in user_prompt("qa", s)
+
+
+def test_qa_brief_hands_non_unit_tests_to_ci_when_there_is_a_pr():
+    text = user_prompt(
+        "qa",
+        state(
+            publish=True,
+            pr_url="https://github.com/o/r/pull/7",
+            pr_number=7,
+            ci_status="fail",
+            ci_summary="e2e: fail https://ci/9",
+        ),
+    )
+    assert "unit tests" in text and "https://ci/9" in text and "pull/7" in text
+    assert "ci_status" not in text  # prose, not a dump
+
+
+def test_qa_brief_without_a_pr_runs_everything_locally():
+    text = user_prompt("qa", state())
+    assert "full test suite" in text.lower()
+
+
+def test_reviewer_brief_points_at_the_pull_request():
+    text = user_prompt("reviewer", state(pr_url="https://github.com/o/r/pull/7", pr_number=7))
+    assert "gh pr diff 7" in text and "gh pr review 7" in text
+
+
+def test_coder_brief_says_the_host_pushes():
+    assert "Do not push" in user_prompt("coder", state(publish=True))

@@ -33,6 +33,12 @@ class TaskState(TypedDict, total=False):
     worktree: str
     branch: str
     base_sha: str
+    base_branch: str  # what the PR targets
+    publish: bool  # push + draft PR + CI after every coder run
+    pr_url: str
+    pr_number: int
+    ci_status: str  # pass | fail | none | timeout | error
+    ci_summary: str
     spec: str
     acceptance_criteria: list[str]
     plan: str
@@ -48,12 +54,20 @@ class TaskState(TypedDict, total=False):
 
 
 def initial_state(
-    *, task_id: str, request: str, repo: str, max_iterations: int = DEFAULT_MAX_ITERATIONS
+    *,
+    task_id: str,
+    request: str,
+    repo: str,
+    max_iterations: int = DEFAULT_MAX_ITERATIONS,
+    publish: bool = False,
+    base_branch: str = "main",
 ) -> TaskState:
     return TaskState(
         task_id=task_id,
         request=request,
         repo=repo,
+        base_branch=base_branch,
+        publish=publish,
         iteration=0,
         max_iterations=max_iterations,
         status="running",

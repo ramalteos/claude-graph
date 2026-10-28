@@ -9,14 +9,7 @@ from pathlib import Path
 
 DEFAULT_ENGINE = "container"  # Apple `container`; CLAUDE_BOX_ENGINE semantics
 
-# Judgement-heavy roles get the most capable model; the hands get opus.
-DEFAULT_MODELS = {
-    "pm": "fable",
-    "architect": "fable",
-    "coder": "opus",
-    "qa": "opus",
-    "reviewer": "opus",
-}
+DEFAULT_MODELS = {role: "opus" for role in ("pm", "architect", "coder", "qa", "reviewer")}
 DEFAULT_EFFORT = "high"
 
 

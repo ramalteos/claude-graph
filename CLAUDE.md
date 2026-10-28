@@ -10,14 +10,16 @@ submodule). The orchestrator is Python; the engine side is bash in the sandbox r
   runner owns worktrees, mounts and the engine; `claude_graph/boxes.py` owns the
   subprocess and the log. Anything engine-specific belongs in the sandbox repo.
 - **A role is a `.md` under `claude_graph/roles/` plus one node in `graph.py`.** Reports are
-  the last fenced ```json block of the box's final `result` text, validated strictly
+  the last fenced `json` block of the box's final `result` text, validated strictly
   (`reports.py`); an unparseable report takes the conservative branch (qa fail, reviewer
   `changes`).
 - **The dashboard reads files, it never recomputes state.** `tasks/<id>.json` is rewritten
   atomically after every node; `logs/<id>/<nn>-<role>.meta.json` is the per-box record.
   A record left open by a dead orchestrator is stale, not running.
-- **Nothing is pushed or merged by the graph.** The deliverable is branch
-  `claude-graph/<task-id>` in the target repo.
+- **Boxes never push; the host does.** After each coder run the `publish` node (host side,
+  `git push` + `gh`) pushes `claude-graph/<task-id>`, keeps one draft PR, waits for CI;
+  the reviewer reviews that PR. Nothing is ever merged by the graph. `--no-publish` keeps
+  a task local.
 - Docs and commands say "sandbox" / "runner"; the engine-side project name stays in code
   identifiers only.
 
