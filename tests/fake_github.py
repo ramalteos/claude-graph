@@ -14,6 +14,8 @@ class FakeGitHub:
     fail_push: bool = False
     calls: list[str] = field(default_factory=list)
     prs: dict[str, PullRequest] = field(default_factory=dict)
+    titles: list[str] = field(default_factory=list)
+    bodies: list[str] = field(default_factory=list)
 
     def push(self, repo: Path, branch: str) -> None:
         self.calls.append("push")
@@ -22,6 +24,8 @@ class FakeGitHub:
 
     def ensure_pr(self, repo: Path, branch: str, base: str, title: str, body: str) -> PullRequest:
         self.calls.append("ensure_pr")
+        self.titles.append(title)
+        self.bodies.append(body)
         if branch not in self.prs:
             self.prs[branch] = PullRequest(
                 url=f"https://github.com/o/r/pull/{len(self.prs) + 7}", number=len(self.prs) + 7
@@ -34,3 +38,8 @@ class FakeGitHub:
 
     def mark_ready(self, repo: Path, number: int) -> None:
         self.calls.append("mark_ready")
+
+    def update_pr(self, repo: Path, number: int, title: str, body: str) -> None:
+        self.calls.append("update_pr")
+        self.titles.append(title)
+        self.bodies.append(body)

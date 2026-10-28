@@ -99,3 +99,9 @@ def test_mark_ready_calls_gh(world):
     repo, _, tmp = world
     GhGitHub().mark_ready(repo, 7)
     assert "pr ready 7" in argv_log(tmp)
+
+
+def test_update_pr_edits_title_and_body(world):
+    repo, _, tmp = world
+    GhGitHub().update_pr(repo, 7, "feat(x): add y", "## What")
+    assert any(a.startswith("pr edit 7 --title feat(x): add y --body") for a in argv_log(tmp))

@@ -25,6 +25,8 @@ class ArchitectReport(_Report):
 
 class CoderReport(_Report):
     summary: str
+    pr_title: str = ""  # commit-style, follows the repo's commitlint; empty = use the request
+    pr_body: str = ""  # short, with a checklist; empty = use the spec
 
 
 class QaReport(_Report):

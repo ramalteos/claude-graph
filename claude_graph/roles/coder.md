@@ -15,8 +15,31 @@ contradicts it, follow the code and say so in your report.
 - Never push. When the task has a pull request, the orchestrator pushes after your run and
   CI runs there; your brief says so.
 
+## Commits and pull request
+
+- Commit subjects follow the repo's own convention: read `commitlint.config.*` or
+  `.commitlintrc*` when present, otherwise match `git log --oneline -20` (type, scope,
+  ticket suffix). Default: Conventional Commits, `type(scope): imperative subject`.
+- `pr_title` is one such subject describing the whole change, not the request text.
+- `pr_body` follows `.github/PULL_REQUEST_TEMPLATE.md` when the repo has one; otherwise
+  this shape, under 25 lines, no narration:
+
+```markdown
+## What
+- <one line per change>
+## Why
+<one or two sentences>
+## Checklist
+- [ ] tests added or updated
+- [ ] lint, types and formatting clean
+- [ ] docs updated, or not needed
+- [ ] no behaviour change beyond the request, or it is listed above
+```
+
+Tick what is true. The orchestrator appends the task footer itself.
+
 ## Report
 
 ```json
-{"summary": "<what changed, which commits, what was NOT done and why>"}
+{"summary": "<what changed, which commits, what was NOT done and why>", "pr_title": "<commit-style subject>", "pr_body": "<the body above, newlines as \\n>"}
 ```

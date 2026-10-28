@@ -114,3 +114,10 @@ def test_reviewer_brief_points_at_the_pull_request():
 
 def test_coder_brief_says_the_host_pushes():
     assert "Do not push" in user_prompt("coder", state(publish=True))
+
+
+def test_coder_persona_asks_for_a_commit_style_title_and_a_checklist_body():
+    text = system_prompt("coder")
+    assert "pr_title" in text and "pr_body" in text
+    assert "commitlint" in text and "PULL_REQUEST_TEMPLATE" in text
+    assert "- [ ]" in text  # the checklist shape is given, not described

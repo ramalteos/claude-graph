@@ -374,3 +374,51 @@ def test_without_publish_the_flow_stays_local():
     )
     assert final["status"] == "done" and gh.calls == [] and "pr_url" not in final
     assert "full test suite" in prompt_for(runner, "qa").lower()
+
+
+def test_publish_uses_the_coder_pr_title_and_body_and_updates_them_each_run():
+    from fake_github import FakeGitHub
+
+    gh = FakeGitHub()
+    first = result(
+        report({"summary": "s", "pr_title": "feat(x): add y [DPT-0]", "pr_body": "## What\n- y"})
+    )
+    second = result(
+        report(
+            {
+                "summary": "s2",
+                "pr_title": "feat(x): add y and z [DPT-0]",
+                "pr_body": "## What\n- y\n- z",
+            }
+        )
+    )
+    final, runner = run(
+        {
+            "architect": [PLAN],
+            "coder": [first, second],
+            "qa": [QA_FAIL, QA_PASS],
+            "reviewer": [APPROVE],
+        },
+        github=gh,
+        publish=True,
+    )
+    assert final["status"] == "done"
+    assert (
+        gh.titles[0] == "feat(x): add y [DPT-0]" and gh.titles[-1] == "feat(x): add y and z [DPT-0]"
+    )
+    assert (
+        gh.bodies[-1].startswith("## What\n- y\n- z") and "t1" in gh.bodies[-1]
+    )  # footer names the task
+    assert gh.calls.count("update_pr") == 1  # the second run edits the existing PR
+
+
+def test_publish_falls_back_to_the_request_when_the_coder_gave_no_title():
+    from fake_github import FakeGitHub
+
+    gh = FakeGitHub()
+    final, runner = run(
+        {"architect": [PLAN], "coder": [CODED], "qa": [QA_PASS], "reviewer": [APPROVE]},
+        github=gh,
+        publish=True,
+    )
+    assert final["status"] == "done" and gh.titles[0] == "REQ"

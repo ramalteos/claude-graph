@@ -38,6 +38,8 @@ class GitHub(Protocol):
 
     def mark_ready(self, repo: Path, number: int) -> None: ...
 
+    def update_pr(self, repo: Path, number: int, title: str, body: str) -> None: ...
+
 
 @dataclass(frozen=True)
 class GhGitHub:
@@ -130,6 +132,13 @@ class GhGitHub:
         else:
             status = "timeout"  # something still pending when the watch ended
         return Checks(status, "\n".join(lines))
+
+    def update_pr(self, repo: Path, number: int, title: str, body: str) -> None:
+        _run(
+            [self.gh, "pr", "edit", str(number), "--title", title, "--body", body],
+            cwd=repo,
+            timeout=60,
+        )
 
     def mark_ready(self, repo: Path, number: int) -> None:
         subprocess.run(

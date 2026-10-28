@@ -92,3 +92,17 @@ def test_the_last_json_block_wins_even_with_a_trailing_plain_fence():
     text = '```json\n{"summary": "first"}\n```\n```json\n{"summary": "last"}\n```\n```\nnotes\n```'
     r = parse_report(text, CoderReport)
     assert r is not None and r.summary == "last"
+
+
+def test_coder_report_carries_an_optional_pr_title_and_body():
+    from claude_graph.reports import CoderReport, parse_report
+
+    old = parse_report('```json\n{"summary": "s"}\n```', CoderReport)
+    assert old is not None and old.pr_title == "" and old.pr_body == ""
+    new = parse_report(
+        '```json\n{"summary": "s", "pr_title": "feat(x): add y", "pr_body": "## What\\n- y"}\n```',
+        CoderReport,
+    )
+    assert (
+        new is not None and new.pr_title == "feat(x): add y" and new.pr_body.startswith("## What")
+    )

@@ -191,6 +191,10 @@ class _Nodes:
             )
         elif report:
             update["coder_summary"] = report.summary
+            if report.pr_title:
+                update["pr_title"] = report.pr_title
+            if report.pr_body:
+                update["pr_body"] = report.pr_body
         else:
             update["coder_summary"] = _tail(res.result_text)
         return update
@@ -199,16 +203,18 @@ class _Nodes:
         """Host side, no box: push the branch, keep one draft PR, wait for its checks."""
         assert self.github is not None
         repo, branch = Path(state["repo"]), state["branch"]
-        title = state["request"].strip().splitlines()[0][:70]
-        body = (
-            f"Task `{state['task_id']}`, opened by claude-graph; reviewed on this pull request, "
-            f"never merged by it.\n\n{state.get('spec', '')[:3000]}"
+        title = state.get("pr_title") or state["request"].strip().splitlines()[0][:70]
+        body = (state.get("pr_body") or state.get("spec", "")[:3000]).rstrip() + (
+            f"\n\nTask `{state['task_id']}`, opened by claude-graph; reviewed on this pull "
+            "request, never merged by it."
         )
         try:
             self.github.push(repo, branch)
             pr = self.github.ensure_pr(
                 repo, branch, state.get("base_branch") or "main", title, body
             )
+            if state.get("pr_number"):  # a later coder run: title and body may have improved
+                self.github.update_pr(repo, pr.number, title, body)
             checks = self.github.wait_checks(repo, pr.number, self.ci_timeout_s)
         except PublishError as e:
             return TaskState(status="failed", ci_status="error", ci_summary=str(e))

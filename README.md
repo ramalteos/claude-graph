@@ -244,7 +244,10 @@ Defaults: every role on `opus` at effort `xhigh`. Values are Claude Code `--mode
    value: QA → fail, reviewer → changes, architect → raw text as the plan.
 5. After the coder, `publish` (host side, `git push` and `gh`) pushes the branch, keeps one
    draft PR per task, and records the PR's checks as `ci_status` (`pass`, `fail`, `none`,
-   `timeout`) plus a per-check summary that QA and the reviewer read.
+   `timeout`) plus a per-check summary that QA and the reviewer read. The PR's title and
+   body come from the coder's report: a commit-style subject in the repo's commitlint
+   convention and a short checklist body (the repo's PR template when it has one); both
+   are updated after every coder run.
 
 Report contract:
 
@@ -252,7 +255,7 @@ Report contract:
 | --- | --- |
 | pm | `{"spec": "…", "acceptance_criteria": ["…"]}` |
 | architect | `{"plan": "…"}` |
-| coder | `{"summary": "…"}` |
+| coder | `{"summary": "…", "pr_title": "…", "pr_body": "…"}` |
 | qa | `{"passed": true \| false, "report": "…"}` |
 | reviewer | `{"verdict": "approve" \| "changes" \| "redesign", "notes": "…"}` |
 

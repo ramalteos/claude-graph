@@ -37,6 +37,8 @@ class TaskState(TypedDict, total=False):
     publish: bool  # push + draft PR + CI after every coder run
     pr_url: str
     pr_number: int
+    pr_title: str  # from the coder's report
+    pr_body: str
     ci_status: str  # pass | fail | none | timeout | error
     ci_summary: str
     spec: str
