@@ -558,3 +558,40 @@ def test_an_orchestrator_releases_only_its_own_pid_file(tmp_path):
     pid_file.write_text(str(os.getpid()))
     _release_pid(pid_file)
     assert not pid_file.exists()
+
+
+@pytest.mark.parametrize(
+    ("text", "slug"),
+    [
+        (
+            "Check partnership service and suggest me an api which can be optimized and create the api",
+            "check-partnership-service-suggest-api",
+        ),
+        ("Add a /health endpoint that reports DB status", "add-health-endpoint-reports-db"),
+        (
+            "Fix: NPE in PartnerService.getById() — see DPT-1234",
+            "fix-npe-partnerservice-getbyid-see",
+        ),
+        ("   ", "task"),
+        ("Ünïcödé café ñ", "unicode-cafe-n"),
+    ],
+)
+def test_default_task_id_is_a_slug_of_the_request(text, slug):
+    from claude_graph.cli import _slug
+
+    assert _slug(text) == slug
+    assert len(_slug("x" * 200)) <= 40
+
+
+def test_a_repeated_request_gets_a_numbered_task_id(env, capsys):
+    tmp, repo = env
+    for _ in range(2):
+        assert (
+            run_cli(
+                "run", repo, "add a route", "--no-publish", "--engine", "fake", "--runner", FAKE
+            )
+            == 0
+        )
+    ids = sorted(p.stem for p in (tmp / "state" / "tasks").glob("*.json"))
+    assert ids == ["add-route", "add-route-2"]
+    assert "branch:     claude-graph/add-route-2" in capsys.readouterr().out

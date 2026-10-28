@@ -17,7 +17,8 @@ submodule). The orchestrator is Python; the engine side is bash in the sandbox r
   atomically after every node; `logs/<id>/<nn>-<role>.meta.json` is the per-box record.
   A record left open by a dead orchestrator is stale, not running.
 - **Boxes never push; the host does.** After each coder run the `publish` node (host side,
-  `git push` + `gh`) pushes `claude-graph/<task-id>`, keeps one draft PR, waits for CI;
+  `git push` + `gh`) pushes the task branch (`claude-graph/<slug>`, named by the pm; the
+  task id until then), keeps one draft PR, waits for CI;
   the reviewer reviews that PR. Nothing is ever merged by the graph. `--no-publish` keeps
   a task local.
 - Docs and commands say "sandbox" / "runner"; the engine-side project name stays in code

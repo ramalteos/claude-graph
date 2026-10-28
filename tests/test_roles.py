@@ -121,3 +121,8 @@ def test_coder_persona_asks_for_a_commit_style_title_and_a_checklist_body():
     assert "pr_title" in text and "pr_body" in text
     assert "commitlint" in text and "PULL_REQUEST_TEMPLATE" in text
     assert "- [ ]" in text  # the checklist shape is given, not described
+
+
+def test_pm_persona_asks_for_a_branch_slug():
+    text = system_prompt("pm")
+    assert '"slug"' in text and "kebab-case" in text

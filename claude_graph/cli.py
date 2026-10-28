@@ -5,11 +5,13 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import signal
 import subprocess
 import sys
 import threading
-import time
+import unicodedata
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -54,7 +56,9 @@ def parser() -> argparse.ArgumentParser:
         help="the repo (a git checkout; default: the current directory) and what you want; "
         "omit with --resume",
     )
-    run.add_argument("--task-id", help="[A-Za-z0-9._-]{1,40}; default: a timestamp")
+    run.add_argument(
+        "--task-id", help="[A-Za-z0-9._-]{1,40}; default: a slug of the request, -2 on repeats"
+    )
     run.add_argument("--resume", metavar="TASK_ID", help="continue a task from its last checkpoint")
     run.add_argument(
         "--max-iterations",
@@ -147,26 +151,28 @@ def cmd_run(args: argparse.Namespace) -> int:
         raise CliError("runner not found; put abox on PATH or pass --runner <path>")
     if not os.access(claude_box, os.X_OK):
         raise CliError(f"runner is not executable: {claude_box}   (chmod +x it)")
-    task_id = args.resume or args.task_id or time.strftime("t%Y%m%d-%H%M%S")
-    if not TASK_ID.match(task_id):
-        raise CliError(f"task id must match {TASK_ID.pattern}: {task_id!r}")
     if not args.resume and not request:
         raise CliError("a request is required (or --resume <task-id>)")
+    task_id = args.resume or args.task_id or _slug(request)
+    if not TASK_ID.match(task_id):
+        raise CliError(f"task id must match {TASK_ID.pattern}: {task_id!r}")
 
     root = state_dir()
     root.mkdir(parents=True, exist_ok=True)
-    holder = Store(root, None, args.engine).pid(task_id)
-    if holder:
-        raise CliError(f"task {task_id} is already running (pid {holder}); cancel it first")
     runner = ClaudeBoxRunner(
         claude_box=claude_box.resolve(),
         engine=args.engine,
         log_dir=root / "logs",
         timeout_s=args.timeout,
     )
-    config = {"configurable": {"thread_id": task_id}}
     with SqliteSaver.from_conn_string(str(root / "checkpoints.sqlite")) as saver:
         probe = build_graph(runner, load_settings(repo), checkpointer=saver)
+        if not args.resume and not args.task_id:
+            task_id = _free_id(task_id, lambda t: bool(probe.get_state(_cfg(t)).values))
+        config = _cfg(task_id)
+        holder = Store(root, None, args.engine).pid(task_id)
+        if holder:
+            raise CliError(f"task {task_id} is already running (pid {holder}); cancel it first")
         if args.resume:
             snapshot = probe.get_state(config)
             if not snapshot.values:
@@ -229,6 +235,31 @@ def cmd_run(args: argparse.Namespace) -> int:
             return 130
     print(summary(final))
     return 0 if final["status"] == "done" else 1
+
+
+_STOP_WORDS = frozenset(
+    "a an the and or of to for in on at by with is are be can which that this it me my i we "
+    "you please into from as".split()
+)
+
+
+def _slug(text: str) -> str:
+    """A task id from the request: ASCII, lowercase, the first five non-filler words."""
+    ascii_text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode()
+    words = [w for w in re.split(r"[^a-z0-9]+", ascii_text.lower()) if w and w not in _STOP_WORDS]
+    return "-".join(words[:5])[:37].rstrip("-") or "task"
+
+
+def _free_id(base: str, taken: Callable[[str], bool]) -> str:
+    """`base`, or `base-2`, `base-3`, … for a request that ran before."""
+    candidate, n = base, 2
+    while taken(candidate):
+        candidate, n = f"{base}-{n}", n + 1
+    return candidate
+
+
+def _cfg(task_id: str) -> dict:
+    return {"configurable": {"thread_id": task_id}}
 
 
 def _current_branch(repo: Path) -> str:

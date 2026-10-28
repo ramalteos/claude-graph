@@ -105,3 +105,19 @@ def test_update_pr_edits_title_and_body(world):
     repo, _, tmp = world
     GhGitHub().update_pr(repo, 7, "feat(x): add y", "## What")
     assert any(a.startswith("pr edit 7 --title feat(x): add y --body") for a in argv_log(tmp))
+
+
+def test_rename_branch_renames_in_the_repo_and_refuses_a_taken_name(world):
+    repo, _, _ = world
+    gh = GhGitHub()
+    assert gh.rename_branch(repo, "claude-graph/t1", "claude-graph/optimize-product-read") is True
+    names = subprocess.run(
+        ["git", "-C", str(repo), "branch", "--list", "claude-graph/*"],
+        capture_output=True,
+        text=True,
+    ).stdout
+    assert "optimize-product-read" in names and " t1" not in names
+    subprocess.run(["git", "-C", str(repo), "branch", "claude-graph/other"], check=True)
+    assert (
+        gh.rename_branch(repo, "claude-graph/optimize-product-read", "claude-graph/other") is False
+    )

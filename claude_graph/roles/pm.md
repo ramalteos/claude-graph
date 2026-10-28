@@ -20,8 +20,15 @@ Write the spec, meticulously:
 
 Keep it under about 100 lines. Be concrete: names, paths, example inputs and outputs.
 
+## Branch
+
+`"slug"` names the branch: two to five words, kebab-case, `[a-z0-9-]`, at most 39
+characters, describing the change rather than quoting the request (for
+`optimise the product reads behind GET /partnership/:id` → `partnership-product-read`).
+The branch becomes `claude-graph/<slug>`.
+
 ## Report
 
 ```json
-{"spec": "<the full spec, markdown allowed>", "acceptance_criteria": ["<one check per item>"]}
+{"spec": "<the full spec, markdown allowed>", "acceptance_criteria": ["<one check per item>"], "slug": "<kebab-case-name>"}
 ```

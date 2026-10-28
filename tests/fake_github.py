@@ -16,9 +16,13 @@ class FakeGitHub:
     prs: dict[str, PullRequest] = field(default_factory=dict)
     titles: list[str] = field(default_factory=list)
     bodies: list[str] = field(default_factory=list)
+    pushed: list[str] = field(default_factory=list)
+    renamed: list[tuple[str, str]] = field(default_factory=list)
+    rename_ok: bool = True
 
     def push(self, repo: Path, branch: str) -> None:
         self.calls.append("push")
+        self.pushed.append(branch)
         if self.fail_push:
             raise PublishError("push rejected: no remote")
 
@@ -38,6 +42,11 @@ class FakeGitHub:
 
     def mark_ready(self, repo: Path, number: int) -> None:
         self.calls.append("mark_ready")
+
+    def rename_branch(self, repo: Path, old: str, new: str) -> bool:
+        self.calls.append("rename_branch")
+        self.renamed.append((old, new))
+        return self.rename_ok
 
     def update_pr(self, repo: Path, number: int, title: str, body: str) -> None:
         self.calls.append("update_pr")

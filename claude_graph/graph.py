@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
-from claude_graph.boxes import BoxResult, BoxRunner
+from claude_graph.boxes import BRANCH_PREFIX, BoxResult, BoxRunner
 from claude_graph.config import Settings
 from claude_graph.github import GitHub, PublishError
 from claude_graph.reports import (
@@ -95,6 +96,14 @@ def after_reviewer(state: TaskState) -> str:
 # --- nodes -------------------------------------------------------------------------------
 
 
+_SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{0,38}$")
+
+
+def _branch_for(slug: str) -> str | None:
+    """`claude-graph/<slug>` when the pm's slug is a sane ref component, else None."""
+    return BRANCH_PREFIX + slug if _SLUG.match(slug) and ".." not in slug else None
+
+
 def _attempts(state: TaskState, role: str) -> int:
     return sum(1 for s in state.get("steps", []) if s["role"] == role)
 
@@ -165,6 +174,11 @@ class _Nodes:
             return update
         update["spec"] = report.spec if report else res.result_text or ""
         update["acceptance_criteria"] = report.acceptance_criteria if report else []
+        if report and self.github is not None and res.branch:
+            named = _branch_for(report.slug)
+            if named and named != res.branch:
+                if self.github.rename_branch(Path(state["repo"]), res.branch, named):
+                    update["branch"] = named
         return update
 
     def architect(self, state: TaskState) -> TaskState:

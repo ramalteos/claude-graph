@@ -130,7 +130,9 @@ as a path (`./x`, `../x`, `/x`) to a directory; a bare word that merely matches 
 folder name is part of the request.
 
 What happens: a worktree on branch `claude-graph/<task-id>` is cut from the repo's HEAD
-inside a box; then one box per role runs in it — pm, architect, coder, qa, reviewer —
+inside a box (the task id defaults to a slug of the request, `-2` on a repeat; `--task-id`
+names it); the pm then names the change and the branch becomes `claude-graph/<slug>`.
+One box per role runs in the worktree — pm, architect, coder, qa, reviewer —
 looping back on a QA fail or a reviewer's `changes` (to the coder) or `redesign` (to the
 architect), at most `--max-iterations` coder runs (default 10). After every coder run the
 host pushes the branch, opens the draft PR against the branch that was checked out when
@@ -157,7 +159,7 @@ way the resumed task goes through the publish step before QA runs again.
 
 ## Take the result
 
-The deliverable is the pull request from `claude-graph/<task-id>`, a draft until the
+The deliverable is the pull request from `claude-graph/<slug>`, a draft until the
 reviewer approves, with the reviewer's findings as a review comment and CI run on it.
 Merge it on GitHub, or close it; the graph never merges. With `--no-publish` the
 deliverable is the local branch instead:
@@ -253,7 +255,7 @@ Report contract:
 
 | role | block |
 | --- | --- |
-| pm | `{"spec": "…", "acceptance_criteria": ["…"]}` |
+| pm | `{"spec": "…", "acceptance_criteria": ["…"], "slug": "…"}` |
 | architect | `{"plan": "…"}` |
 | coder | `{"summary": "…", "pr_title": "…", "pr_body": "…"}` |
 | qa | `{"passed": true \| false, "report": "…"}` |

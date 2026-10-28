@@ -40,6 +40,8 @@ class GitHub(Protocol):
 
     def update_pr(self, repo: Path, number: int, title: str, body: str) -> None: ...
 
+    def rename_branch(self, repo: Path, old: str, new: str) -> bool: ...
+
 
 @dataclass(frozen=True)
 class GhGitHub:
@@ -132,6 +134,17 @@ class GhGitHub:
         else:
             status = "timeout"  # something still pending when the watch ended
         return Checks(status, "\n".join(lines))
+
+    def rename_branch(self, repo: Path, old: str, new: str) -> bool:
+        """`git branch -m`; False when the name is taken or the old branch is missing."""
+        proc = subprocess.run(
+            ["git", "-C", str(repo), "branch", "-m", old, new],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        return proc.returncode == 0
 
     def update_pr(self, repo: Path, number: int, title: str, body: str) -> None:
         _run(

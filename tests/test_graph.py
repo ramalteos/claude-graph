@@ -422,3 +422,56 @@ def test_publish_falls_back_to_the_request_when_the_coder_gave_no_title():
         publish=True,
     )
     assert final["status"] == "done" and gh.titles[0] == "REQ"
+
+
+def test_the_pm_names_the_branch_and_everything_after_uses_it():
+    from fake_github import FakeGitHub
+
+    gh = FakeGitHub()
+    named = result(
+        report({"spec": "S", "acceptance_criteria": [], "slug": "optimize-product-read"})
+    )
+    runner = FakeRunner(
+        {
+            "pm": [named],
+            "architect": [PLAN],
+            "coder": [CODED],
+            "qa": [QA_PASS],
+            "reviewer": [APPROVE],
+        }
+    )
+    graph = build_graph(runner, Settings(), github=gh)
+    final = graph.invoke(initial_state(task_id="t1", request="REQ", repo="/r", publish=True))
+    assert final["status"] == "done" and final["branch"] == "claude-graph/optimize-product-read"
+    assert gh.renamed == [("claude-graph/t1", "claude-graph/optimize-product-read")]
+    assert gh.pushed == ["claude-graph/optimize-product-read"]
+    assert "claude-graph/optimize-product-read" in prompt_for(runner, "coder")
+
+
+def test_a_bad_or_taken_slug_keeps_the_task_branch():
+    from fake_github import FakeGitHub
+
+    bad = result(report({"spec": "S", "acceptance_criteria": [], "slug": "Not A Slug!"}))
+    gh = FakeGitHub()
+    runner = FakeRunner(
+        {"pm": [bad], "architect": [PLAN], "coder": [CODED], "qa": [QA_PASS], "reviewer": [APPROVE]}
+    )
+    final = build_graph(runner, Settings(), github=gh).invoke(
+        initial_state(task_id="t1", request="REQ", repo="/r", publish=True)
+    )
+    assert final["branch"] == "claude-graph/t1" and gh.renamed == []
+    taken = FakeGitHub(rename_ok=False)
+    good = result(report({"spec": "S", "acceptance_criteria": [], "slug": "optimize-product-read"}))
+    runner = FakeRunner(
+        {
+            "pm": [good],
+            "architect": [PLAN],
+            "coder": [CODED],
+            "qa": [QA_PASS],
+            "reviewer": [APPROVE],
+        }
+    )
+    final = build_graph(runner, Settings(), github=taken).invoke(
+        initial_state(task_id="t1", request="REQ", repo="/r", publish=True)
+    )
+    assert final["branch"] == "claude-graph/t1" and taken.pushed == ["claude-graph/t1"]

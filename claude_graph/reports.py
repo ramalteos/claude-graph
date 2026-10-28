@@ -17,6 +17,7 @@ class _Report(BaseModel):
 class PmReport(_Report):
     spec: str
     acceptance_criteria: list[str]
+    slug: str = ""  # kebab-case name for the branch; empty = keep the task id
 
 
 class ArchitectReport(_Report):

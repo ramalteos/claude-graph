@@ -106,3 +106,15 @@ def test_coder_report_carries_an_optional_pr_title_and_body():
     assert (
         new is not None and new.pr_title == "feat(x): add y" and new.pr_body.startswith("## What")
     )
+
+
+def test_pm_report_carries_an_optional_branch_slug():
+    from claude_graph.reports import PmReport, parse_report
+
+    old = parse_report('```json\n{"spec": "s", "acceptance_criteria": []}\n```', PmReport)
+    assert old is not None and old.slug == ""
+    new = parse_report(
+        '```json\n{"spec": "s", "acceptance_criteria": [], "slug": "optimize-product-read"}\n```',
+        PmReport,
+    )
+    assert new is not None and new.slug == "optimize-product-read"
