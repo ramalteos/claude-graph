@@ -11,7 +11,7 @@ from langgraph.graph.state import CompiledStateGraph
 
 from claude_graph.boxes import BRANCH_PREFIX, BoxResult, BoxRunner
 from claude_graph.config import Settings
-from claude_graph.github import GitHub, PublishError
+from claude_graph.github import RISK_LABELS, GitHub, PublishError
 from claude_graph.reports import (
     ArchitectReport,
     CoderReport,
@@ -211,6 +211,8 @@ class _Nodes:
                 update["pr_title"] = report.pr_title
             if report.pr_body:
                 update["pr_body"] = report.pr_body
+            if report.risk in RISK_LABELS:
+                update["risk"] = report.risk
         else:
             update["coder_summary"] = _tail(res.result_text)
         return update
@@ -231,8 +233,14 @@ class _Nodes:
             checks = self.github.wait_checks(repo, pr.number, self.ci_timeout_s)
         except PublishError as e:
             return TaskState(status="failed", ci_status="error", ci_summary=str(e))
+        summary = checks.summary
+        if state.get("risk"):
+            try:
+                self.github.label_risk(repo, pr.number, state["risk"])
+            except PublishError as e:  # a label is not worth failing the task
+                summary = f"{summary}\nrisk label: {e}".strip()
         return TaskState(
-            pr_url=pr.url, pr_number=pr.number, ci_status=checks.status, ci_summary=checks.summary
+            pr_url=pr.url, pr_number=pr.number, ci_status=checks.status, ci_summary=summary
         )
 
     def qa(self, state: TaskState) -> TaskState:
@@ -258,6 +266,13 @@ class _Nodes:
         update = self._update(state, "reviewer", attempt, res, report is not None)
         if report:
             update["review_verdict"], update["review_notes"] = report.verdict, report.notes
+            if report.risk in RISK_LABELS and report.risk != state.get("risk"):
+                update["risk"] = report.risk
+                if self.github is not None and state.get("pr_number"):
+                    try:
+                        self.github.label_risk(Path(state["repo"]), state["pr_number"], report.risk)
+                    except PublishError:
+                        pass  # the corrected level is still in state and the notes
         else:
             update["review_verdict"] = "changes"
             update["review_notes"] = (

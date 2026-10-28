@@ -49,8 +49,19 @@ contradicts it, follow the code and say so in your report.
 
 Tick what is true.
 
+## Risk
+
+Rate the change by the worst thing it touches; the host labels the pull request
+`risk:<level>`:
+
+- `low`: tests, docs, logging, an internal refactor with no behaviour change.
+- `medium`: a behaviour change on an existing path, a new endpoint or job, a dependency
+  bump; rolled back by reverting the PR.
+- `high`: a schema or data migration, auth or permissions, money or commission, deletion of
+  data, infrastructure or deploy config, a shared package other services import.
+
 ## Report
 
 ```json
-{"summary": "<what changed, which commits, what was NOT done and why>", "pr_title": "<commit-style subject>", "pr_body": "<the body above, newlines as \\n>"}
+{"summary": "<what changed, which commits, what was NOT done and why>", "pr_title": "<commit-style subject>", "pr_body": "<the body above, newlines as \\n>", "risk": "<low|medium|high>"}
 ```

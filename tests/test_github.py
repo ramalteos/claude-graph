@@ -115,3 +115,22 @@ def test_rename_branch_renames_in_the_repo_and_refuses_a_taken_name(world):
     assert "optimize-product-read" in names and " t1" not in names
     subprocess.run(["git", "-C", str(repo), "branch", "other"], check=True)
     assert gh.rename_branch(repo, "optimize-product-read", "other") is False
+
+
+def test_label_risk_creates_the_missing_labels_then_swaps_them(world, monkeypatch):
+    from claude_graph.github import RISK_LABELS
+
+    repo, _, tmp = world
+    monkeypatch.setenv("FAKE_GH_LABELS", '[{"name":"risk:low"},{"name":"deploy:dublin"}]')
+    GhGitHub().label_risk(repo, 7, "high")
+    log = argv_log(tmp)
+    assert log[0] == "label list --json name --limit 200"
+    created = [ln for ln in log if ln.startswith("label create")]
+    assert created == [
+        f"label create risk:{level} -c {color} -d {text}"
+        for level, (color, text) in RISK_LABELS.items()
+        if level != "low"
+    ]
+    assert log[-1] == (
+        "pr edit 7 --add-label risk:high --remove-label risk:low --remove-label risk:medium"
+    )

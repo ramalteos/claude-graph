@@ -163,7 +163,10 @@ way the resumed task goes through the publish step before QA runs again.
 ## Take the result
 
 The deliverable is the pull request from the pm-named branch, a draft until the reviewer
-approves, with the reviewer's findings as a review comment and CI run on it. The coder
+approves, with the reviewer's findings as a review comment and CI run on it. It carries a
+`risk:low`, `risk:medium` or `risk:high` label: the lead developer's rating by the worst
+thing the change touches, corrected by the reviewer when wrong; the three labels are
+created in the repo on first use. The coder
 reads every review comment on it (CodeRabbit or human) before each run and fixes what is
 valid; a change too large for one review becomes a stack of PRs via `gh stack`. Merge it
 on GitHub, or close it; the graph never merges. With `--no-publish` the deliverable is the

@@ -44,6 +44,7 @@ class TaskState(TypedDict, total=False):
     pr_number: int
     pr_title: str  # from the coder's report
     pr_body: str
+    risk: str  # low | medium | high: the coder's call, corrected by the reviewer
     ci_status: str  # pass | fail | none | timeout | error
     ci_summary: str
     spec: str

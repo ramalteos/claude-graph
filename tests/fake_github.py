@@ -19,6 +19,8 @@ class FakeGitHub:
     pushed: list[str] = field(default_factory=list)
     renamed: list[tuple[str, str]] = field(default_factory=list)
     rename_ok: bool = True
+    labels: list[tuple[int, str]] = field(default_factory=list)
+    fail_label: bool = False
 
     def push(self, repo: Path, branch: str) -> None:
         self.calls.append("push")
@@ -52,3 +54,9 @@ class FakeGitHub:
         self.calls.append("update_pr")
         self.titles.append(title)
         self.bodies.append(body)
+
+    def label_risk(self, repo: Path, number: int, risk: str) -> None:
+        self.calls.append("label_risk")
+        if self.fail_label:
+            raise PublishError("label: HTTP 403")
+        self.labels.append((number, risk))

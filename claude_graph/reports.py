@@ -28,6 +28,7 @@ class CoderReport(_Report):
     summary: str
     pr_title: str = ""  # commit-style, follows the repo's commitlint; empty = use the request
     pr_body: str = ""  # short, with a checklist; empty = use the spec
+    risk: str = ""  # low | medium | high; anything else is ignored
 
 
 class QaReport(_Report):
@@ -37,6 +38,7 @@ class QaReport(_Report):
 
 class ReviewReport(_Report):
     verdict: Literal["approve", "changes", "redesign"]
+    risk: str = ""  # set only to correct the coder's level
     notes: str
 
 

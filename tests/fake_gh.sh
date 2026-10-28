@@ -14,6 +14,8 @@ case "$1 $2" in
                fi
                [ -n "${FAKE_GH_CHECKS:-}" ] && [ -f "$FAKE_GH_CHECKS" ] && cat "$FAKE_GH_CHECKS" || echo '[]' ;;
   "pr ready")  exit 0 ;;
+  "label list") printf '%s' "${FAKE_GH_LABELS:-[]}" ;;
+  "label create") exit 0 ;;
   "pr edit")   exit 0 ;;
   *)           exit 0 ;;
 esac

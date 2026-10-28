@@ -493,3 +493,51 @@ def test_the_pm_slug_becomes_the_branch_only_when_it_is_a_sane_ref(slug, branch)
     from claude_graph.graph import _branch_for
 
     assert _branch_for(slug) == branch
+
+
+RISKY = result(report({"summary": "CODED-IT", "risk": "high"}))
+
+
+def test_the_coder_rates_the_risk_and_the_host_labels_the_pr():
+    from fake_github import FakeGitHub
+
+    gh = FakeGitHub()
+    final, _ = run(
+        {"architect": [PLAN], "coder": [RISKY], "qa": [QA_PASS], "reviewer": [APPROVE]},
+        github=gh,
+        publish=True,
+    )
+    assert final["risk"] == "high" and gh.labels == [(7, "high")]
+    assert gh.calls.index("label_risk") > gh.calls.index("ensure_pr")
+
+
+def test_the_reviewer_corrects_the_risk_and_an_unknown_level_is_ignored():
+    from fake_github import FakeGitHub
+
+    gh = FakeGitHub()
+    corrected = result(report({"verdict": "approve", "notes": "lgtm", "risk": "medium"}))
+    final, _ = run(
+        {"architect": [PLAN], "coder": [RISKY], "qa": [QA_PASS], "reviewer": [corrected]},
+        github=gh,
+        publish=True,
+    )
+    assert final["risk"] == "medium" and gh.labels == [(7, "high"), (7, "medium")]
+    odd = result(report({"summary": "CODED-IT", "risk": "meh"}))
+    final, _ = run(
+        {"architect": [PLAN], "coder": [odd], "qa": [QA_PASS], "reviewer": [APPROVE]},
+        github=FakeGitHub(),
+        publish=True,
+    )
+    assert "risk" not in final
+
+
+def test_a_label_failure_is_a_note_not_a_failure():
+    from fake_github import FakeGitHub
+
+    gh = FakeGitHub(fail_label=True)
+    final, _ = run(
+        {"architect": [PLAN], "coder": [RISKY], "qa": [QA_PASS], "reviewer": [APPROVE]},
+        github=gh,
+        publish=True,
+    )
+    assert final["status"] == "done" and "risk label: label: HTTP 403" in final["ci_summary"]

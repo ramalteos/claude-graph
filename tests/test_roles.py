@@ -165,3 +165,10 @@ def test_reviewer_brief_names_the_slack_channel_only_with_a_pr_and_a_channel():
     assert "Only after an `approve` verdict" in text
     assert "Slack" not in user_prompt("reviewer", with_pr)
     assert "Slack" not in user_prompt("reviewer", state(), slack_channel="pull-request-review")
+
+
+def test_coder_and_reviewer_personas_share_the_risk_scale():
+    coder, reviewer = system_prompt("coder"), system_prompt("reviewer")
+    assert "## Risk" in coder and '"risk": "<low|medium|high>"' in coder
+    assert "`risk:<level>`" in coder and "`risk:<level>`" in reviewer
+    assert "only to correct the label" in reviewer

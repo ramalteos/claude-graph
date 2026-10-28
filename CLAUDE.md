@@ -18,7 +18,8 @@ submodule). The orchestrator is Python; the engine side is bash in the sandbox r
   A record left open by a dead orchestrator is stale, not running.
 - **Boxes never push; the host does.** After each coder run the `publish` node (host side,
   `git push` + `gh`) pushes the task branch (named `<type>/<what>` by the pm; the task id
-  until then), keeps one draft PR, waits for CI;
+  until then), keeps one draft PR labelled `risk:<level>` from the coder's report (the
+  reviewer may correct it; labels created on first use), waits for CI;
   the reviewer reviews that PR and, with `[slack] channel` set, announces its approval on
   Slack from inside its box; on `approve` the host marks the PR ready. Nothing is ever
   merged by the graph. `--no-publish` keeps a task local.

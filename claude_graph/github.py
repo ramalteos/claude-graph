@@ -9,6 +9,12 @@ from pathlib import Path
 from typing import Literal, Protocol
 
 CiStatus = Literal["pass", "fail", "none", "timeout"]
+# risk:<level> labels, created in a repo on first use. Colours as in the Alteos monorepo.
+RISK_LABELS = {
+    "low": ("0e8a16", "small, reversible, no behaviour change beyond the request"),
+    "medium": ("fbca04", "a behaviour change on an existing path; rolled back by a revert"),
+    "high": ("b60205", "schema, auth, money, data deletion, infra or shared code"),
+}
 
 
 class PublishError(Exception):
@@ -41,6 +47,8 @@ class GitHub(Protocol):
     def update_pr(self, repo: Path, number: int, title: str, body: str) -> None: ...
 
     def rename_branch(self, repo: Path, old: str, new: str) -> bool: ...
+
+    def label_risk(self, repo: Path, number: int, risk: str) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -152,6 +160,25 @@ class GhGitHub:
             cwd=repo,
             timeout=60,
         )
+
+    def label_risk(self, repo: Path, number: int, risk: str) -> None:
+        """`risk:<level>` on the PR and the other levels off; missing labels are created."""
+        listed = _run(
+            [self.gh, "label", "list", "--json", "name", "--limit", "200"], cwd=repo, timeout=60
+        )
+        have = {label["name"] for label in json.loads(listed or "[]")}
+        for level, (color, description) in RISK_LABELS.items():
+            if f"risk:{level}" not in have:
+                _run(
+                    [self.gh, "label", "create", f"risk:{level}", "-c", color, "-d", description],
+                    cwd=repo,
+                    timeout=60,
+                )
+        argv = [self.gh, "pr", "edit", str(number), "--add-label", f"risk:{risk}"]
+        for level in RISK_LABELS:
+            if level != risk:
+                argv += ["--remove-label", f"risk:{level}"]
+        _run(argv, cwd=repo, timeout=60)
 
     def mark_ready(self, repo: Path, number: int) -> None:
         subprocess.run(

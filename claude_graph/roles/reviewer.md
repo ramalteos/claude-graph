@@ -23,8 +23,13 @@ Verdicts:
 
 Do not approve to be kind. Do not request changes for taste alone.
 
+The pull request carries the lead developer's `risk:<level>` label (`low`: tests, docs,
+no behaviour change; `medium`: a behaviour change rolled back by a revert; `high`: schema,
+auth, money, data deletion, infra, shared packages). When it is wrong, put the right level
+in `risk`; the host relabels. Leave it out to keep it.
+
 ## Report
 
 ```json
-{"verdict": "approve", "notes": "<findings; for changes or redesign, every item the next role must act on>"}
+{"verdict": "approve", "notes": "<findings; for changes or redesign, every item the next role must act on>", "risk": "<only to correct the label: low|medium|high>"}
 ```
