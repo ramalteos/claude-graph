@@ -23,7 +23,13 @@ from claude_graph.boxes import ClaudeBoxRunner
 from claude_graph.config import DEFAULT_ENGINE, find_claude_box, load_settings, state_dir
 from claude_graph.github import GhGitHub
 from claude_graph.graph import build_graph
-from claude_graph.state import DEFAULT_MAX_ITERATIONS, TASK_ID, TaskState, initial_state
+from claude_graph.state import (
+    DEFAULT_MAX_ITERATIONS,
+    MAX_TASK_ID,
+    TASK_ID,
+    TaskState,
+    initial_state,
+)
 from claude_graph.ui.data import Store
 from claude_graph.ui.server import UiContext, serve
 
@@ -247,10 +253,19 @@ _STOP_WORDS = frozenset(
 
 
 def _slug(text: str) -> str:
-    """A task id from the request: ASCII, lowercase, the first five non-filler words."""
+    """A task id from the request: ASCII, lowercase, up to five non-filler words that fit
+    MAX_TASK_ID; a URL counts as its last path segment (a ticket key, a PR number)."""
+    text = re.sub(r"https?://\S+", lambda m: m.group(0).rstrip("/").rsplit("/", 1)[-1], text)
     ascii_text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode()
     words = [w for w in re.split(r"[^a-z0-9]+", ascii_text.lower()) if w and w not in _STOP_WORDS]
-    return "-".join(words[:5])[:37].rstrip("-") or "task"
+    if not words:
+        return "task"
+    slug = words[0][:MAX_TASK_ID]
+    for word in words[1:5]:
+        if len(slug) + 1 + len(word) > MAX_TASK_ID:
+            break
+        slug += f"-{word}"
+    return slug
 
 
 def _free_id(base: str, taken: Callable[[str], bool]) -> str:

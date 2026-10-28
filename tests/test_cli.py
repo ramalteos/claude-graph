@@ -563,22 +563,24 @@ def test_an_orchestrator_releases_only_its_own_pid_file(tmp_path):
         (
             "Check partnership service and suggest me an api which can be optimized "
             "and create the api",
-            "check-partnership-service-suggest-api",
+            "check-partnership-service-suggest",
         ),
         ("Add a /health endpoint that reports DB status", "add-health-endpoint-reports-db"),
         (
             "Fix: NPE in PartnerService.getById() — see DPT-1234",
-            "fix-npe-partnerservice-getbyid-see",
+            "fix-npe-partnerservice-getbyid",
         ),
+        ("implement this https://versicorp.atlassian.net/browse/DPT-9894", "implement-dpt-9894"),
         ("   ", "task"),
         ("Ünïcödé café ñ", "unicode-cafe-n"),
     ],
 )
 def test_default_task_id_is_a_slug_of_the_request(text, slug):
     from claude_graph.cli import _slug
+    from claude_graph.state import MAX_TASK_ID
 
     assert _slug(text) == slug
-    assert len(_slug("x" * 200)) <= 40
+    assert len(_slug("x" * 200)) == MAX_TASK_ID
 
 
 def test_a_repeated_request_gets_a_numbered_task_id(env, capsys):

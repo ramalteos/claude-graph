@@ -21,6 +21,10 @@ BOX_PREFIX = "claude-box-"  # the runner prepends this to every --name
 BRANCH_PREFIX = ""  # the task branch is the task id until the pm names the change
 
 
+def box_name(task_id: str, role: str, attempt: int) -> str:
+    return f"graph-{task_id}-{role}-{attempt}"
+
+
 @dataclass(frozen=True)
 class BoxResult:
     exit_code: int
@@ -71,7 +75,7 @@ class ClaudeBoxRunner:
         model: str,
         effort: str,
     ) -> BoxResult:
-        name = f"graph-{task_id}-{role}-{attempt}"
+        name = box_name(task_id, role, attempt)
         stem = self.log_dir / task_id / f"{attempt:02d}-{role}"
         stem.parent.mkdir(parents=True, exist_ok=True)
         prompt_file = stem.with_suffix(".prompt.md")

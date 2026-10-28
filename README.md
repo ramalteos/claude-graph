@@ -131,8 +131,9 @@ as a path (`./x`, `../x`, `/x`) to a directory; a bare word that merely matches 
 folder name is part of the request.
 
 What happens: a worktree on a branch named after the task id is cut from the repo's HEAD
-inside a box (the task id defaults to a slug of the request, `-2` when that id or branch
-already exists; `--task-id` names it); the pm then names the change and the branch is
+inside a box (the task id defaults to a slug of the request, at most 33 characters, a URL
+counting as its last path segment; `-2` when that id or branch already exists; `--task-id`
+names it); the pm then names the change and the branch is
 renamed to its `<type>/<what>` (for example `refactor/partnership-product-read`). One box
 per role runs in the worktree — pm, architect, coder, qa, reviewer —
 looping back on a QA fail or a reviewer's `changes` (to the coder) or `redesign` (to the

@@ -15,6 +15,16 @@ def test_ordinary_task_ids_pass(good):
     assert TASK_ID.match(good)
 
 
+def test_task_id_fits_the_longest_box_name():
+    from claude_graph.boxes import BOX_PREFIX, box_name
+    from claude_graph.state import MAX_TASK_ID
+
+    longest = BOX_PREFIX + box_name("x" * MAX_TASK_ID, "architect", 20)
+    assert len(longest) <= 63  # Apple `container` rejects a longer container id
+    assert TASK_ID.match("x" * MAX_TASK_ID)
+    assert TASK_ID.match("x" * (MAX_TASK_ID + 1)) is None
+
+
 def test_default_cap_is_ten_coder_runs():
     from claude_graph.state import DEFAULT_MAX_ITERATIONS, initial_state
 

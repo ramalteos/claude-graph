@@ -9,8 +9,13 @@ from typing import Annotated, Literal, TypedDict
 Status = Literal["running", "done", "exhausted", "failed"]
 Verdict = Literal["approve", "changes", "redesign"]
 DEFAULT_MAX_ITERATIONS = 10
+# Apple `container` caps a container id at 63 chars; the longest box name is
+# claude-box-graph-<task id>-architect-NN.
+MAX_TASK_ID = 33
 # git-valid branch suffix: no leading dot/dash, trailing dot, "..", ".lock"; \Z: no newline
-TASK_ID = re.compile(r"^(?![.-])(?!.*\.\.)(?!.*\.lock\Z)[A-Za-z0-9._-]{1,40}(?<!\.)\Z")
+TASK_ID = re.compile(
+    rf"^(?![.-])(?!.*\.\.)(?!.*\.lock\Z)[A-Za-z0-9._-]{{1,{MAX_TASK_ID}}}(?<!\.)\Z"
+)
 
 
 class StepRecord(TypedDict):
