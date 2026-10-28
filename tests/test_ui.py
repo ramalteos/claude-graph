@@ -237,7 +237,7 @@ def test_index_without_actions_has_no_token(ui):
 def test_state_has_every_section(ui, alive):
     base, _, tmp = ui
     s = json.loads(get(base + "/api/state")[1])
-    assert s["api_version"] == 1 and s["engine"] == "fake"
+    assert s["api_version"] == 2 and s["engine"] == "fake"
     assert s["login"] == "missing"
     t = s["tasks"][0]
     assert t["task_id"] == "t1" and t["status"] == "running"
