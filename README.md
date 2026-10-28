@@ -132,7 +132,7 @@ folder name is part of the request.
 What happens: a worktree on branch `claude-graph/<task-id>` is cut from the repo's HEAD
 inside a box; then one box per role runs in it — pm, architect, coder, qa, reviewer —
 looping back on a QA fail or a reviewer's `changes` (to the coder) or `redesign` (to the
-architect), at most `--max-iterations` coder runs (default 3). After every coder run the
+architect), at most `--max-iterations` coder runs (default 10). After every coder run the
 host pushes the branch, opens the draft PR against the branch that was checked out when
 the task started (once), and waits up to `--ci-timeout` seconds (default 900) for the PR's
 checks; the result goes into QA's and the reviewer's briefs. The terminal prints a summary

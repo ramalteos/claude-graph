@@ -370,7 +370,7 @@ function showNew() {
     <label>repository (absolute path)<input name="repo" list="repos" required placeholder="/Users/you/Documents/GitHub/repo"><datalist id="repos">${repos.map(r => `<option value="${esc(r)}">`).join("")}</datalist></label>
     <label>request<textarea name="request" required placeholder="add a /health endpoint that reports DB status"></textarea></label>
     <label>task id (optional, [A-Za-z0-9._-])<input name="task_id" pattern="[A-Za-z0-9._-]{1,40}"></label>
-    <label>max coder iterations<input name="max_iterations" type="number" min="1" max="20" value="3"></label>
+    <label>max coder iterations<input name="max_iterations" type="number" min="1" max="20" value="10"></label>
     <div><button type="submit">start</button> <span id="newerr" class="bad"></span></div></form>`;
   $("newform").onsubmit = async (e) => {
     e.preventDefault();
