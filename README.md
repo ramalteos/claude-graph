@@ -169,12 +169,13 @@ valid; a change too large for one review becomes a stack of PRs via `gh stack`. 
 on GitHub, or close it; the graph never merges. With `--no-publish` the deliverable is the
 local branch instead:
 
-**Slack.** With `CLAUDE_GRAPH_SLACK_WEBHOOK` set to a Slack Incoming Webhook URL (made for
-the channel that announces pull requests), the host posts the PR when the reviewer
-approves: the link with the PR title, then the body's `## What` bullets, or the coder's
-summary when there are none. A failed post never changes the verdict; the run summary and
-`status` show `slack: posted` or the error. Runs started from the dashboard inherit the
-variable from the `claude-graph ui` process.
+**Slack.** With `[slack] channel = "pull-request-review"` in `claude-graph.toml`, the
+reviewer posts the approved PR there itself: `<link|title>`, then the body's `## What`
+bullets. It uses whatever Slack tool the box has: boxes start with the host's enabled
+plugins (`CLAUDE_BOX_SEED_PLUGINS=host`, claude-graph's default for the runner), and the
+claude.ai Slack connector arrives with the login like the Atlassian one. Plugin OAuth
+tokens never leave the host, so a Slack plugin must be authorised in the sandbox login;
+the connector needs nothing. A missing tool is noted in the review, never a failure.
 
 ```sh
 cd <repo>
@@ -187,8 +188,8 @@ abox headless . --worktree <task-id> --remove        # drop the worktree; the br
 Flags for `run`: `--engine container|docker|fake|auto` (default `container`),
 `--runner <path>`, `--timeout <seconds per box>` (default 3600), `--no-publish`,
 `--publish` (with `--resume`), `--ci-timeout <seconds>` (default 900). Environment:
-`CLAUDE_GRAPH_SLACK_WEBHOOK` (announce approved PRs), `CLAUDE_GRAPH_STATE`,
-`CLAUDE_GRAPH_RUNNER`.
+`CLAUDE_BOX_SEED_PLUGINS` (default `host`: the host's enabled plugins go into every box;
+`0` keeps boxes bare), `CLAUDE_GRAPH_STATE`, `CLAUDE_GRAPH_RUNNER`.
 
 ### Dashboard (`ui`)
 
@@ -241,6 +242,8 @@ Actions (`--actions` only; destructive ones ask you to type the task id):
 coder = "sonnet"      # override per role
 [efforts]
 qa = "low"            # default for every role: xhigh
+[slack]
+channel = "pull-request-review"   # the reviewer announces an approved PR here
 ```
 
 Defaults: every role on `opus` at effort `xhigh`. Values are Claude Code `--model` /

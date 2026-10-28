@@ -605,15 +605,3 @@ def test_a_task_id_never_collides_with_an_existing_branch(env, capsys):
         == 0
     )
     assert "branch:     add-route-2" in capsys.readouterr().out
-
-
-def test_the_webhook_env_var_announces_the_approved_pr(env, capsys, monkeypatch):
-    from fake_slack import webhook_server
-
-    tmp, repo = env
-    with webhook_server() as (url, received):
-        monkeypatch.setenv("CLAUDE_GRAPH_SLACK_WEBHOOK", url)
-        rc = run_cli("run", repo, "x", "--task-id", "t1", "--engine", "fake", "--runner", FAKE)
-    assert rc == 0
-    assert len(received) == 1 and "pull/7" in received[0]["text"]
-    assert "slack:      posted" in capsys.readouterr().out

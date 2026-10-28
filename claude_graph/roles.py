@@ -20,7 +20,7 @@ def system_prompt(role: str) -> str:
     return f"{persona}\n\n---\n\n{rules}\n\n---\n\n{standards}"
 
 
-def user_prompt(role: str, state: TaskState) -> str:
+def user_prompt(role: str, state: TaskState, slack_channel: str = "") -> str:
     """What this role is asked to do now: the request plus what earlier roles produced."""
     _check(role)
     parts = [
@@ -55,6 +55,7 @@ def user_prompt(role: str, state: TaskState) -> str:
     if role == "reviewer":
         _section(parts, "QA report", state.get("qa_report"))
         _section(parts, "Pull request", _reviewer_pr(state))
+        _section(parts, "Slack", _reviewer_slack(state, slack_channel))
     return "\n".join(parts)
 
 
@@ -104,6 +105,19 @@ def _reviewer_pr(state: TaskState) -> str | None:
         f"`gh api repos/{{owner}}/{{repo}}/pulls/{n}/comments`; CodeRabbit included): a "
         "valid finding the coder left unaddressed is a `changes` item in your notes; one "
         "that was fixed or rightly declined is not."
+    )
+
+
+def _reviewer_slack(state: TaskState, channel: str) -> str | None:
+    if not channel or not state.get("pr_url"):
+        return None
+    title = state.get("pr_title") or state["request"].strip().splitlines()[0][:70]
+    return (
+        f"Only after an `approve` verdict, before your final message: post one message in "
+        f"the Slack channel `#{channel}` with the Slack tool (`slack_send_message`, or the "
+        f"claude.ai Slack connector). First line `<{state['pr_url']}|{title}>`, then the "
+        "pull request body's `## What` bullets, nothing else: no greeting, no @mentions, "
+        "no verdict text. Without a Slack tool, say so in your notes and continue."
     )
 
 

@@ -17,6 +17,7 @@ DEFAULT_EFFORT = "xhigh"
 class Settings:
     models: dict[str, str] = field(default_factory=dict)
     efforts: dict[str, str] = field(default_factory=dict)
+    slack_channel: str = ""  # where the reviewer announces an approved PR; empty = nowhere
 
     def model(self, role: str) -> str:
         return self.models.get(role, DEFAULT_MODELS[role])
@@ -56,12 +57,14 @@ def find_claude_box() -> Path | None:
 
 def load_settings(repo: Path) -> Settings:
     """`<repo>/claude-graph.toml`, else `~/.config/claude-graph/config.toml`, else defaults.
-    Shape: `[models] coder = "sonnet"`, `[efforts] qa = "low"`.
+    Shape: `[models] coder = "sonnet"`, `[efforts] qa = "low"`, `[slack] channel = "..."`.
     """
     for path in (repo / "claude-graph.toml", Path.home() / ".config/claude-graph/config.toml"):
         if path.is_file():
             data = tomllib.loads(path.read_text(encoding="utf-8"))
             return Settings(
-                models=dict(data.get("models", {})), efforts=dict(data.get("efforts", {}))
+                models=dict(data.get("models", {})),
+                efforts=dict(data.get("efforts", {})),
+                slack_channel=str(data.get("slack", {}).get("channel", "")).lstrip("#"),
             )
     return Settings()

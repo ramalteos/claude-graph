@@ -34,3 +34,11 @@ def test_every_role_defaults_to_opus():
     from claude_graph.roles import ROLE_NAMES
 
     assert {Settings().model(r) for r in ROLE_NAMES} == {"opus"}
+
+
+def test_slack_channel_comes_from_the_repo_toml(tmp_path):
+    from claude_graph.config import load_settings
+
+    (tmp_path / "claude-graph.toml").write_text('[slack]\nchannel = "#pull-request-review"\n')
+    assert load_settings(tmp_path).slack_channel == "pull-request-review"
+    assert load_settings(tmp_path / "nowhere").slack_channel == ""

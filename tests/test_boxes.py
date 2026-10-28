@@ -64,6 +64,7 @@ def test_argv_and_result(tmp_path, argv_file, monkeypatch):
     assert r.box == "claude-box-graph-t1-coder-1"
     assert r.log_path == tmp_path / "logs" / "t1" / "01-coder.log"
     assert "a note on stderr" in r.log_path.read_text()
+    assert (tmp_path / "argv.seed").read_text() == "host\n"  # the host's plugins, by default
 
 
 def test_no_result_event_means_no_text(tmp_path, argv_file):
@@ -213,3 +214,9 @@ def test_remove_worktree_surfaces_the_runner_error(tmp_path):
     runner = ClaudeBoxRunner(claude_box=stub, engine="fake", log_dir=tmp_path)
     with pytest.raises(RuntimeError, match="worktree dir still present"):
         runner.remove_worktree(task_id="t1", repo=tmp_path)
+
+
+def test_the_environment_can_keep_boxes_bare(tmp_path, argv_file, monkeypatch):
+    monkeypatch.setenv("CLAUDE_BOX_SEED_PLUGINS", "0")
+    run_coder(tmp_path)
+    assert (tmp_path / "argv.seed").read_text() == "0\n"

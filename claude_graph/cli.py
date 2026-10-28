@@ -23,7 +23,6 @@ from claude_graph.boxes import ClaudeBoxRunner
 from claude_graph.config import DEFAULT_ENGINE, find_claude_box, load_settings, state_dir
 from claude_graph.github import GhGitHub
 from claude_graph.graph import build_graph
-from claude_graph.slack import WebhookSlack
 from claude_graph.state import (
     DEFAULT_MAX_ITERATIONS,
     MAX_TASK_ID,
@@ -192,14 +191,12 @@ def cmd_run(args: argparse.Namespace) -> int:
             )
         else:
             publish = not args.no_publish
-        webhook = os.environ.get("CLAUDE_GRAPH_SLACK_WEBHOOK", "").strip()
         graph = build_graph(
             runner,
             load_settings(repo),
             checkpointer=saver,
             github=GhGitHub() if publish else None,
             ci_timeout_s=args.ci_timeout,
-            slack=WebhookSlack(webhook) if publish and webhook else None,
         )
         if args.resume:
             snapshot = graph.get_state(config)
@@ -469,7 +466,6 @@ def summary(state: TaskState) -> str:
         f"  base:       {state.get('base_sha', '-')}",
         *([f"  pr:         {state['pr_url']}"] if state.get("pr_url") else []),
         *([f"  ci:         {state['ci_status']}"] if state.get("ci_status") else []),
-        *([f"  slack:      {state['announced']}"] if state.get("announced") else []),
         f"  iterations: {state.get('iteration', 0)}/{state.get('max_iterations', '?')}",
         f"  boxes:      {len(steps)}  (${cost:.2f})",
     ]

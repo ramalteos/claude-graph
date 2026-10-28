@@ -167,7 +167,8 @@ class ClaudeBoxRunner:
             )
 
     def _env(self) -> dict[str, str]:
-        return {**os.environ, "CLAUDE_BOX_ENGINE": self.engine}
+        # The host's enabled plugins go into every box unless the environment says otherwise.
+        return {"CLAUDE_BOX_SEED_PLUGINS": "host", **os.environ, "CLAUDE_BOX_ENGINE": self.engine}
 
     def _stop(self, box: str) -> None:
         """Best effort: runs inside the timeout and Ctrl-C paths, which must not raise."""

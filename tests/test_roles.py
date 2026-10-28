@@ -156,3 +156,12 @@ def test_pm_slug_instruction_asks_for_a_type_prefix_and_no_tool_name():
 def test_pr_text_holds_only_facts_about_the_change(role):
     text = system_prompt(role)
     assert "only facts about this change" in text and "commit trailers" in text
+
+
+def test_reviewer_brief_names_the_slack_channel_only_with_a_pr_and_a_channel():
+    with_pr = state(pr_url="https://github.com/o/r/pull/7", pr_number=7, pr_title="feat: x")
+    text = user_prompt("reviewer", with_pr, slack_channel="pull-request-review")
+    assert "`#pull-request-review`" in text and "<https://github.com/o/r/pull/7|feat: x>" in text
+    assert "Only after an `approve` verdict" in text
+    assert "Slack" not in user_prompt("reviewer", with_pr)
+    assert "Slack" not in user_prompt("reviewer", state(), slack_channel="pull-request-review")

@@ -6,6 +6,7 @@ sub="${1:-}"
 { printf 'ENGINE=%s\n' "${CLAUDE_BOX_ENGINE:-}"
   if read -r -t 1 _; then printf 'STDIN=data\n'; else printf 'STDIN=eof\n'; fi
   printf '%s\n' "$@"; printf '===\n'; } >> "${FAKE_ARGV:?}.$sub"
+printf '%s\n' "${CLAUDE_BOX_SEED_PLUGINS:-}" > "$FAKE_ARGV.seed"
 [ "$sub" = headless ] || exit 0
 name="" wt="" branch="" remove=0 prev=""
 for a in "$@"; do
