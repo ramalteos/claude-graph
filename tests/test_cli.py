@@ -507,3 +507,54 @@ def test_resume_with_publish_opens_the_pr_for_a_local_task(env, capsys, monkeypa
         "pr create --draft --head claude-graph/t1 --base main"
         in (tmp / "ghstate" / "argv.log").read_text()
     )
+
+
+def test_resume_refuses_a_task_another_orchestrator_is_driving(env, capsys):
+    tmp, repo = env
+    run_cli(
+        "run",
+        repo,
+        "x",
+        "--task-id",
+        "t1",
+        "--max-iterations",
+        "1",
+        "--no-publish",
+        "--engine",
+        "fake",
+        "--runner",
+        FAKE,
+    )
+    capsys.readouterr()
+    other = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)", "claude_graph"])
+    try:
+        (tmp / "state" / "tasks" / "t1.pid").write_text(str(other.pid))
+        rc = run_cli(
+            "run",
+            repo,
+            "--resume",
+            "t1",
+            "--max-iterations",
+            "2",
+            "--engine",
+            "fake",
+            "--runner",
+            FAKE,
+        )
+        err = capsys.readouterr().err
+        assert rc == 2 and "already running" in err and str(other.pid) in err
+    finally:
+        other.kill()
+        other.wait()
+
+
+def test_an_orchestrator_releases_only_its_own_pid_file(tmp_path):
+    from claude_graph.cli import _release_pid
+
+    pid_file = tmp_path / "t1.pid"
+    pid_file.write_text("424242")  # another orchestrator's
+    _release_pid(pid_file)
+    assert pid_file.read_text() == "424242"
+    pid_file.write_text(str(os.getpid()))
+    _release_pid(pid_file)
+    assert not pid_file.exists()

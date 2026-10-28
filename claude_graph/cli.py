@@ -22,6 +22,7 @@ from claude_graph.config import DEFAULT_ENGINE, find_claude_box, load_settings, 
 from claude_graph.github import GhGitHub
 from claude_graph.graph import build_graph
 from claude_graph.state import DEFAULT_MAX_ITERATIONS, TASK_ID, TaskState, initial_state
+from claude_graph.ui.data import Store
 from claude_graph.ui.server import UiContext, serve
 
 
@@ -154,6 +155,9 @@ def cmd_run(args: argparse.Namespace) -> int:
 
     root = state_dir()
     root.mkdir(parents=True, exist_ok=True)
+    holder = Store(root, None, args.engine).pid(task_id)
+    if holder:
+        raise CliError(f"task {task_id} is already running (pid {holder}); cancel it first")
     runner = ClaudeBoxRunner(
         claude_box=claude_box.resolve(),
         engine=args.engine,
@@ -296,9 +300,19 @@ def _drive(graph: Any, state: TaskState | None, config: dict, root: Path) -> Tas
             final = values
             _write_snapshot(root, values)
     finally:
-        pid_file.unlink(missing_ok=True)
+        _release_pid(pid_file)
         _restore_signals(previous)
     return final
+
+
+def _release_pid(pid_file: Path) -> None:
+    """Drop the pid file only if it is still ours; a run that died on a name collision must
+    not erase the orchestrator that owns the task."""
+    try:
+        if pid_file.read_text(encoding="utf-8").strip() == str(os.getpid()):
+            pid_file.unlink()
+    except OSError:
+        pass
 
 
 def _interrupt_on_signals() -> dict[int, Any]:
